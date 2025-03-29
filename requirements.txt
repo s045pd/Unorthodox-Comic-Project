@@ -21,7 +21,7 @@ click-repl==0.3.0
 colorlog==6.7.0
 cron_descriptor==1.4.0
 cssselect==1.2.0
-Django==4.2.5
+Django==4.2.15
 django-celery-beat==2.5.0
 django-celery-results==2.5.1
 django-db-geventpool==4.0.5
