@@ -70,7 +70,7 @@ requests-html==0.10.0
 six==1.16.0
 soupsieve==2.5
 SQLAlchemy==2.0.31
-sqlparse==0.4.4
+sqlparse==0.5.0
 tqdm==4.66.4
 typing_extensions==4.12.1
 tzdata==2023.3
