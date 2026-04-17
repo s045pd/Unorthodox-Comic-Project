@@ -1,0 +1,25 @@
+{{define "login"}}
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Login · SE8</title>
+  <link rel="stylesheet" href="/static/pico.min.css" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <main class="container" style="max-width:400px;margin-top:5rem">
+    <hgroup>
+      <h1>SE8</h1>
+      <h2>Sign in</h2>
+    </hgroup>
+    {{if .Error}}<article><strong>{{.Error}}</strong></article>{{end}}
+    <form action="/login" method="post">
+      <input type="text" name="username" placeholder="Username" required autofocus />
+      <input type="password" name="password" placeholder="Password" required />
+      <button type="submit">Sign in</button>
+    </form>
+  </main>
+</body>
+</html>
+{{end}}

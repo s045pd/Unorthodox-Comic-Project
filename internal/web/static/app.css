@@ -1,0 +1,13 @@
+body { max-width: 1100px; }
+nav.app-nav { display: flex; gap: 1rem; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--pico-muted-border-color); }
+nav.app-nav a { text-decoration: none; }
+nav.app-nav .spacer { flex: 1; }
+table.data { font-size: 0.92rem; }
+table.data td, table.data th { padding: 0.35rem 0.5rem; }
+.cover-thumb { width: 54px; height: 72px; object-fit: cover; border-radius: 4px; }
+.status-pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.8rem; }
+.status-pending { background: #eee; }
+.status-running { background: #ffd; }
+.status-done    { background: #dfd; }
+.status-failed  { background: #fdd; }
+.read-page img { width: 100%; max-width: 900px; display: block; margin: 0 auto; }
