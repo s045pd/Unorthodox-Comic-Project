@@ -5,6 +5,7 @@ go 1.25.7
 require (
 	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/caarlos0/env/v10 v10.0.0
+	github.com/go-pdf/fpdf v0.9.0
 	github.com/joho/godotenv v1.5.1
 	golang.org/x/crypto v0.50.0
 	golang.org/x/image v0.39.0
