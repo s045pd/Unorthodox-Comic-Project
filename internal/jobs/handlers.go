@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/s045pd/se8/internal/crawler"
+	"github.com/s045pd/se8/internal/imaging"
 )
 
 // Deps is the dependency bundle handlers need.
@@ -106,6 +109,310 @@ func (d *Deps) HandleFindBooks(ctx context.Context, _ json.RawMessage) error {
 				)
 			}
 		}
+	}
+	return nil
+}
+
+// Register wires every handler onto runner r using deps d.
+func Register(r *Runner, d *Deps) {
+	r.Register(KindFindBooks, d.HandleFindBooks)
+	r.Register(KindFindEpisodes, d.HandleFindEpisodes)
+	r.Register(KindFindImages, d.HandleFindImages)
+	r.Register(KindDownloadImage, d.HandleDownloadImage)
+	r.Register(KindConvertPDF, d.HandleConvertPDF)
+	r.Register(KindFixImages, d.HandleFixImages)
+	r.Register(KindFixPDF, d.HandleFixPDF)
+}
+
+func (d *Deps) HandleFindEpisodes(ctx context.Context, payload json.RawMessage) error {
+	var p findEpisodesPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+	if p.BookID == "" {
+		return errors.New("missing book_id")
+	}
+
+	var rawURL string
+	if err := d.DB.QueryRowContext(ctx,
+		`SELECT raw_url FROM books WHERE id=?`, p.BookID).Scan(&rawURL); err != nil {
+		return fmt.Errorf("book lookup: %w", err)
+	}
+
+	meta, eps, err := d.Extractor.FetchEpisodes(ctx, rawURL)
+	if err != nil {
+		return err
+	}
+
+	// Update book metadata
+	now := time.Now().Unix()
+	if _, err := d.DB.ExecContext(ctx,
+		`UPDATE books SET hot=?, description=?, updated_at=? WHERE id=?`,
+		meta.Hot, meta.Description, now, p.BookID); err != nil {
+		return err
+	}
+	for _, tagName := range meta.Tags {
+		var tagID int64
+		err := d.DB.QueryRowContext(ctx,
+			`INSERT INTO tags(name) VALUES(?) ON CONFLICT(name) DO UPDATE SET name=excluded.name RETURNING id`,
+			tagName).Scan(&tagID)
+		if err != nil {
+			return fmt.Errorf("tag %q: %w", tagName, err)
+		}
+		if _, err := d.DB.ExecContext(ctx,
+			`INSERT OR IGNORE INTO book_tags(book_id, tag_id) VALUES(?, ?)`,
+			p.BookID, tagID); err != nil {
+			return err
+		}
+	}
+
+	// Upsert episodes; schedule find_images for new ones
+	for _, ep := range eps {
+		res, err := d.DB.ExecContext(ctx, `
+			INSERT INTO episodes (id, book_id, title, raw_url, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET title=excluded.title, raw_url=excluded.raw_url, updated_at=excluded.updated_at`,
+			ep.ID, p.BookID, ep.Title, ep.RawURL, now, now)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			var imgCount int
+			d.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM images WHERE episode_id=?`, ep.ID).Scan(&imgCount)
+			if imgCount == 0 {
+				_ = d.Queue.Enqueue(ctx, KindFindImages,
+					fmt.Sprintf("find_images:%d", ep.ID),
+					findImagesPayload{EpisodeID: ep.ID},
+					WithDelay(5*time.Second))
+			}
+		}
+	}
+	return nil
+}
+
+func (d *Deps) HandleFindImages(ctx context.Context, payload json.RawMessage) error {
+	var p findImagesPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return err
+	}
+	if p.EpisodeID == 0 {
+		return errors.New("missing episode_id")
+	}
+
+	var rawURL string
+	if err := d.DB.QueryRowContext(ctx,
+		`SELECT raw_url FROM episodes WHERE id=?`, p.EpisodeID).Scan(&rawURL); err != nil {
+		return err
+	}
+	imgs, err := d.Extractor.FetchImages(ctx, rawURL)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().Unix()
+	for _, img := range imgs {
+		res, err := d.DB.ExecContext(ctx, `
+			INSERT INTO images (id, episode_id, idx, raw_url, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET idx=excluded.idx, raw_url=excluded.raw_url, updated_at=excluded.updated_at`,
+			img.ID, p.EpisodeID, img.Index, img.RawURL, now, now)
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+
+		var filePath string
+		d.DB.QueryRowContext(ctx, `SELECT file_path FROM images WHERE id=?`, img.ID).Scan(&filePath)
+
+		if n == 1 || p.Force || filePath == "" {
+			_ = d.Queue.Enqueue(ctx, KindDownloadImage,
+				fmt.Sprintf("download_image:%d", img.ID),
+				downloadImagePayload{ImageID: img.ID},
+				WithDelay(time.Duration(img.Index%5)*time.Second))
+		}
+	}
+	return nil
+}
+
+func (d *Deps) HandleDownloadImage(ctx context.Context, payload json.RawMessage) error {
+	var p downloadImagePayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return err
+	}
+
+	var rawURL string
+	var episodeID int64
+	var index int
+	var bookID string
+	err := d.DB.QueryRowContext(ctx, `
+		SELECT i.raw_url, i.episode_id, i.idx, e.book_id
+		FROM images i JOIN episodes e ON e.id = i.episode_id
+		WHERE i.id=?`, p.ImageID).
+		Scan(&rawURL, &episodeID, &index, &bookID)
+	if err != nil {
+		return fmt.Errorf("image lookup: %w", err)
+	}
+	if rawURL == "" {
+		return errors.New("image has no raw_url")
+	}
+
+	data, ext, err := d.Client.DownloadImage(ctx, rawURL)
+	if err != nil {
+		return err
+	}
+	if detected := crawler.ExtFromMagic(data); detected != "" {
+		ext = detected
+	}
+
+	rel := filepath.Join("books",
+		sanitizeID(bookID),
+		fmt.Sprintf("%d", episodeID),
+		fmt.Sprintf("%03d.%s", index, ext))
+	full := d.mediaPath(rel)
+	if err := writeFile(full, data); err != nil {
+		return fmt.Errorf("write image: %w", err)
+	}
+
+	if _, err := d.DB.ExecContext(ctx, `
+		UPDATE images SET file_path=?, bytes=?, updated_at=? WHERE id=?`,
+		filepath.ToSlash(filepath.Join("media", rel)), len(data), time.Now().Unix(), p.ImageID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func sanitizeID(s string) string {
+	s = strings.ReplaceAll(s, "..", "_")
+	s = strings.ReplaceAll(s, "/", "_")
+	s = strings.ReplaceAll(s, "\\", "_")
+	return s
+}
+
+func (d *Deps) HandleConvertPDF(ctx context.Context, payload json.RawMessage) error {
+	var p convertPDFPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return err
+	}
+
+	var title, pdfPath string
+	if err := d.DB.QueryRowContext(ctx,
+		`SELECT title, pdf_path FROM episodes WHERE id=?`, p.EpisodeID).
+		Scan(&title, &pdfPath); err != nil {
+		return err
+	}
+	if pdfPath != "" && !p.Force {
+		return nil
+	}
+
+	rows, err := d.DB.QueryContext(ctx,
+		`SELECT file_path FROM images WHERE episode_id=? ORDER BY idx`, p.EpisodeID)
+	if err != nil {
+		return err
+	}
+	var files []string
+	for rows.Next() {
+		var fp string
+		if err := rows.Scan(&fp); err != nil {
+			rows.Close()
+			return err
+		}
+		if fp != "" {
+			files = append(files, fp)
+		}
+	}
+	rows.Close()
+	if len(files) == 0 {
+		return errors.New("no images downloaded yet")
+	}
+
+	var imgBytes [][]byte
+	for _, rel := range files {
+		b, err := os.ReadFile(filepath.Join(d.VolDir, rel))
+		if err != nil {
+			return fmt.Errorf("read %s: %w", rel, err)
+		}
+		imgBytes = append(imgBytes, b)
+	}
+
+	combined, err := imaging.CombineImages(imgBytes)
+	if err != nil {
+		return err
+	}
+
+	relPDF := filepath.Join("pdfs", fmt.Sprintf("%d.pdf", p.EpisodeID))
+	full := d.mediaPath(relPDF)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		return err
+	}
+	f, err := os.Create(full)
+	if err != nil {
+		return err
+	}
+	if err := imaging.ToPDF(combined, f); err != nil {
+		f.Close()
+		return err
+	}
+	f.Close()
+
+	_, err = d.DB.ExecContext(ctx,
+		`UPDATE episodes SET pdf_path=?, updated_at=? WHERE id=?`,
+		filepath.ToSlash(filepath.Join("media", relPDF)), time.Now().Unix(), p.EpisodeID)
+	return err
+}
+
+func (d *Deps) HandleFixImages(ctx context.Context, _ json.RawMessage) error {
+	rows, err := d.DB.QueryContext(ctx,
+		`SELECT id FROM images WHERE file_path='' LIMIT 500`)
+	if err != nil {
+		return err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+
+	for i, id := range ids {
+		_ = d.Queue.Enqueue(ctx, KindDownloadImage,
+			fmt.Sprintf("download_image:%d", id),
+			downloadImagePayload{ImageID: id},
+			WithDelay(time.Duration(i/50*10)*time.Second))
+	}
+	return nil
+}
+
+func (d *Deps) HandleFixPDF(ctx context.Context, _ json.RawMessage) error {
+	rows, err := d.DB.QueryContext(ctx, `
+		SELECT e.id
+		FROM episodes e
+		WHERE (e.pdf_path = '' OR e.pdf_path IS NULL)
+		  AND EXISTS (SELECT 1 FROM images i WHERE i.episode_id = e.id)
+		  AND NOT EXISTS (SELECT 1 FROM images i WHERE i.episode_id = e.id AND i.file_path = '')
+		LIMIT 100`)
+	if err != nil {
+		return err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+
+	for i, id := range ids {
+		_ = d.Queue.Enqueue(ctx, KindConvertPDF,
+			fmt.Sprintf("convert_pdf:%d", id),
+			convertPDFPayload{EpisodeID: id},
+			WithDelay(time.Duration(i*5)*time.Second))
 	}
 	return nil
 }
