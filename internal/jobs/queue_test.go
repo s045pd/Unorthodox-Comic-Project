@@ -40,6 +40,37 @@ func TestEnqueue_Dedup(t *testing.T) {
 	}
 }
 
+func TestEnqueue_ReenqueuesAfterDone(t *testing.T) {
+	q, db := newTestQueue(t)
+	ctx := context.Background()
+
+	// First enqueue + mark done
+	if err := q.Enqueue(ctx, KindFindBooks, "find_books:daily", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`UPDATE jobs SET status='done' WHERE task_key='find_books:daily'`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second enqueue should replace the done row with a new pending one
+	if err := q.Enqueue(ctx, KindFindBooks, "find_books:daily", nil); err != nil {
+		t.Fatalf("second enqueue: %v", err)
+	}
+
+	var status string
+	var count int
+	db.QueryRowContext(ctx,
+		`SELECT COUNT(*), MAX(status) FROM jobs WHERE task_key='find_books:daily'`).
+		Scan(&count, &status)
+	if count != 1 {
+		t.Errorf("count = %d, want 1 row", count)
+	}
+	if status != "pending" {
+		t.Errorf("status = %q, want pending", status)
+	}
+}
+
 func TestEnqueue_DifferentKeys(t *testing.T) {
 	q, db := newTestQueue(t)
 	ctx := context.Background()

@@ -20,7 +20,7 @@ type flags struct {
 
 func main() {
 	var f flags
-	flag.StringVar(&f.source, "source", "", "source DB URI (sqlite:///path or postgres://...)")
+	flag.StringVar(&f.source, "source", "", "source DB URI (sqlite:///path)")
 	flag.StringVar(&f.sourceMedia, "source-media", "", "source media directory (for PDFs)")
 	flag.StringVar(&f.target, "target", "./vol/se8.db", "target SQLite path")
 	flag.StringVar(&f.targetMedia, "target-media", "./vol/media", "target media directory")

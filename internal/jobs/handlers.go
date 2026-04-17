@@ -176,15 +176,14 @@ func (d *Deps) HandleFindEpisodes(ctx context.Context, payload json.RawMessage) 
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 1 {
-			var imgCount int
-			d.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM images WHERE episode_id=?`, ep.ID).Scan(&imgCount)
-			if imgCount == 0 {
-				_ = d.Queue.Enqueue(ctx, KindFindImages,
-					fmt.Sprintf("find_images:%d", ep.ID),
-					findImagesPayload{EpisodeID: ep.ID},
-					WithDelay(5*time.Second))
-			}
+		_ = res
+		var imgCount int
+		d.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM images WHERE episode_id=?`, ep.ID).Scan(&imgCount)
+		if imgCount == 0 {
+			_ = d.Queue.Enqueue(ctx, KindFindImages,
+				fmt.Sprintf("find_images:%d", ep.ID),
+				findImagesPayload{EpisodeID: ep.ID},
+				WithDelay(5*time.Second))
 		}
 	}
 	return nil

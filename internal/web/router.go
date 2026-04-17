@@ -16,12 +16,14 @@ import (
 )
 
 type Server struct {
-	DB        *sql.DB
-	Auth      *auth.Store
-	Queue     *jobs.Queue
-	VolDir    string
-	Templates *template.Template
-	Logger    *slog.Logger
+	DB           *sql.DB
+	Auth         *auth.Store
+	Queue        *jobs.Queue
+	VolDir       string
+	Templates    *template.Template
+	Logger       *slog.Logger
+	SessionTTL   time.Duration
+	SecureCookie bool
 }
 
 // Router builds the full http.Handler.

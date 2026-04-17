@@ -57,5 +57,5 @@ func (s *Server) handleImageRedownload(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<span>Queued ✓</span>`))
 		return
 	}
-	http.Redirect(w, r, r.Referer(), http.StatusFound)
+	http.Redirect(w, r, safeReferer(r, "/images"), http.StatusFound)
 }

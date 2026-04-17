@@ -96,6 +96,8 @@ func run() error {
 	srv := &web.Server{
 		DB: db, Auth: authStore, Queue: queue, VolDir: volDir,
 		Templates: tpl, Logger: logger,
+		SessionTTL:   cfg.SessionTTL,
+		SecureCookie: cfg.SecureCookie,
 	}
 	httpSrv := &http.Server{
 		Addr:         cfg.Addr,

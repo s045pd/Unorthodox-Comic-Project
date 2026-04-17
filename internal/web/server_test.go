@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/s045pd/se8/internal/auth"
 	"github.com/s045pd/se8/internal/jobs"
@@ -31,12 +32,14 @@ func newTestServer(t *testing.T) (*httptest.Server, string) {
 		t.Fatal(err)
 	}
 	s := &Server{
-		DB:        db,
-		Auth:      authStore,
-		Queue:     jobs.NewQueue(db),
-		VolDir:    t.TempDir(),
-		Templates: tpl,
-		Logger:    testLogger(t),
+		DB:           db,
+		Auth:         authStore,
+		Queue:        jobs.NewQueue(db),
+		VolDir:       t.TempDir(),
+		Templates:    tpl,
+		Logger:       testLogger(t),
+		SessionTTL:   30 * 24 * time.Hour,
+		SecureCookie: false,
 	}
 	srv := httptest.NewServer(s.Router())
 	t.Cleanup(srv.Close)

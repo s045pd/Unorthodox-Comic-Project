@@ -71,20 +71,16 @@ func migrate(ctx context.Context, f flags) error {
 }
 
 func openSource(uri string) (*sql.DB, error) {
+	// sqlite:///absolute/path — three-slash form; strip only "sqlite://" so the
+	// leading slash of the absolute path is preserved.
 	if strings.HasPrefix(uri, "sqlite:///") {
-		// Three-slash form: sqlite:///absolute/path
-		path := strings.TrimPrefix(uri, "sqlite://")
-		return sql.Open("sqlite", path)
+		return sql.Open("sqlite", strings.TrimPrefix(uri, "sqlite://"))
 	}
+	// sqlite://relative/path — two-slash form.
 	if strings.HasPrefix(uri, "sqlite://") {
-		// Two-slash form: sqlite://relative/path
-		path := strings.TrimPrefix(uri, "sqlite://")
-		return sql.Open("sqlite", path)
+		return sql.Open("sqlite", strings.TrimPrefix(uri, "sqlite://"))
 	}
-	if strings.HasPrefix(uri, "postgres://") {
-		return sql.Open("postgres", uri)
-	}
-	return nil, fmt.Errorf("unsupported source URI: %s", uri)
+	return nil, fmt.Errorf("unsupported source URI: %s (only sqlite:// is supported)", uri)
 }
 
 func walkCounts(ctx context.Context, src *sql.DB) (stats, error) {

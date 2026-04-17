@@ -32,6 +32,15 @@ func (q *Queue) Enqueue(ctx context.Context, kind Kind, taskKey string, payload 
 		}
 	}
 
+	// Clear any completed/failed row with this key so the new enqueue can
+	// proceed. Pending/running rows are preserved — INSERT OR IGNORE keeps
+	// them deduplicated.
+	if _, err := q.db.ExecContext(ctx,
+		`DELETE FROM jobs WHERE task_key=? AND status IN ('done','failed')`,
+		taskKey); err != nil {
+		return err
+	}
+
 	_, err := q.db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO jobs (kind, payload, task_key, status, priority, max_attempts, run_at, created_at)
 		VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)`,

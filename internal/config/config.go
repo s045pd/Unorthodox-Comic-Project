@@ -17,6 +17,7 @@ type Config struct {
 	MaxPage               int           `env:"SE8_MAX_PAGE"                 envDefault:"2000"`
 	HTTPTimeout           time.Duration `env:"SE8_HTTP_TIMEOUT"             envDefault:"60s"`
 	SessionTTL            time.Duration `env:"SE8_SESSION_TTL"              envDefault:"720h"`
+	SecureCookie          bool          `env:"SE8_SECURE_COOKIE"            envDefault:"false"`
 	LogLevel              string        `env:"SE8_LOG_LEVEL"                envDefault:"info"`
 	LogFormat             string        `env:"SE8_LOG_FORMAT"               envDefault:"text"`
 	Debug                 bool          `env:"SE8_DEBUG"                    envDefault:"false"`

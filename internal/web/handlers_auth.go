@@ -30,7 +30,7 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	token, err := s.Auth.CreateSession(r.Context(), user.ID, 30*24*time.Hour)
+	token, err := s.Auth.CreateSession(r.Context(), user.ID, s.SessionTTL)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -40,8 +40,9 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   s.SecureCookie,
 		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Now().Add(30 * 24 * time.Hour),
+		Expires:  time.Now().Add(s.SessionTTL),
 	})
 	http.Redirect(w, r, "/books", http.StatusFound)
 }

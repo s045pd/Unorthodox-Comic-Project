@@ -133,7 +133,7 @@ func (s *Server) handleEpisodeFetch(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<span>Fetch queued ✓</span>`))
 		return
 	}
-	http.Redirect(w, r, r.Referer(), http.StatusFound)
+	http.Redirect(w, r, safeReferer(r, "/episodes"), http.StatusFound)
 }
 
 func (s *Server) handleEpisodePDF(w http.ResponseWriter, r *http.Request) {
@@ -146,5 +146,5 @@ func (s *Server) handleEpisodePDF(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<span>PDF queued ✓</span>`))
 		return
 	}
-	http.Redirect(w, r, r.Referer(), http.StatusFound)
+	http.Redirect(w, r, safeReferer(r, "/episodes"), http.StatusFound)
 }
