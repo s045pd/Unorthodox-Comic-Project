@@ -1,0 +1,60 @@
+{{define "book_detail"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{.Title}} · SE8</title>
+  <link rel="stylesheet" href="/static/pico.min.css" />
+  <link rel="stylesheet" href="/static/app.css" />
+  <script src="/static/htmx.min.js"></script>
+</head>
+<body>
+  <main class="container">
+    <nav class="app-nav">
+      <strong>SE8</strong>
+      <a href="/books">Books</a>
+      <a href="/episodes">Episodes</a>
+      <a href="/tags">Tags</a>
+      <a href="/jobs">Jobs</a>
+      <span class="spacer"></span>
+      <form action="/admin/start-crawl" method="post" style="margin:0">
+        <button type="submit" class="secondary">Start Crawl</button>
+      </form>
+      <form action="/logout" method="post" style="margin:0">
+        <button type="submit" class="outline">Logout</button>
+      </form>
+    </nav>
+    {{with .Book}}
+    <article>
+      <hgroup>
+        <h1>{{.Title}}</h1>
+        <h2>hot: {{.Hot}}</h2>
+      </hgroup>
+      {{if .CoverPath}}<img src="/{{.CoverPath}}" style="max-width:180px"/>{{end}}
+      <p>{{.Description}}</p>
+    </article>
+    {{end}}
+    <h2>Episodes</h2>
+    <table class="data striped">
+      <thead><tr><th>ID</th><th>Title</th><th>Images</th><th>PDF</th><th></th></tr></thead>
+      <tbody>
+      {{range .Episodes}}
+        <tr>
+          <td>{{.ID}}</td>
+          <td>{{.Title}}</td>
+          <td>{{.Completed}}/{{.Total}}</td>
+          <td>{{if .PDFPath}}<a href="/{{.PDFPath}}">PDF</a>{{end}}</td>
+          <td>
+            <a role="button" class="secondary outline" href="/episodes/{{.ID}}">Read</a>
+            <button hx-post="/episodes/{{.ID}}/fetch" hx-swap="outerHTML">Fetch</button>
+            <button hx-post="/episodes/{{.ID}}/pdf" hx-swap="outerHTML">PDF</button>
+          </td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>
+{{end}}
