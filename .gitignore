@@ -1,10 +1,24 @@
-.venv
-vol
-*.pyc
-*.pyo
-*.DS_Store
-Dockerfile_*
-*.zip
-*.pdf
-books
-books/*
+# Go
+bin/
+*.exe
+*.test
+*.out
+vendor/
+
+# Runtime data
+vol/
+!vol/.gitkeep
+
+# Legacy Python
+legacy/.venv/
+legacy/**/__pycache__/
+legacy/**/*.pyc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Env
+.env
