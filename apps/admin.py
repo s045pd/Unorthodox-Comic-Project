@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.db.models import Count, Q
 from django.utils.html import format_html
 
 from apps.models import Book, Episode, Image, Tag
@@ -7,18 +8,25 @@ from apps.tasks import convert_to_pdf, download_images, find_episodes, find_imag
 
 @admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
-    list_display = ("name", "get_book_count")
+    list_display = ("name", "book_count")
 
-    def get_book_count(self, obj):
-        """Get the number of books associated with this tag"""
-        return obj.books.count()
+    def get_queryset(self, request):
+        """预计算书籍数量"""
+        queryset = super().get_queryset(request)
+        queryset = queryset.annotate(book_count=Count("books"))
+        return queryset
 
-    get_book_count.short_description = "Number of Books"
+    def book_count(self, obj):
+        """使用预计算的书籍数量"""
+        return obj.book_count
+
+    book_count.short_description = "Number of Books"
+    book_count.admin_order_field = "book_count"
 
 
 @admin.register(Book)
 class BookAdmin(admin.ModelAdmin):
-    list_display = ("id", "title", "get_episode_count", "hot", "view_episodes")
+    list_display = ("id", "title", "episode_count", "hot", "view_episodes")
     search_fields = ("title", "id")
     list_filter = ("tags",)
     readonly_fields = (
@@ -33,11 +41,18 @@ class BookAdmin(admin.ModelAdmin):
     )
     actions = ["start_crawling"]
 
-    def get_episode_count(self, obj):
-        """Get the number of episodes for this book"""
-        return obj.episodes.count()
+    def get_queryset(self, request):
+        """预计算章节数量"""
+        queryset = super().get_queryset(request)
+        queryset = queryset.annotate(episode_count=Count("episodes"))
+        return queryset
 
-    get_episode_count.short_description = "Number of Episodes"
+    def episode_count(self, obj):
+        """使用预计算的章节数量"""
+        return obj.episode_count
+
+    episode_count.short_description = "Episodes"
+    episode_count.admin_order_field = "episode_count"
 
     def view_episodes(self, obj):
         """Generate a link to view episodes of this book"""
@@ -50,7 +65,7 @@ class BookAdmin(admin.ModelAdmin):
 
     def start_crawling(self, request, queryset):
         """Start crawling episodes for selected books"""
-        for book in queryset:
+        for book in queryset.only("id"):
             find_episodes.apply_async(args=[book.id])
 
     start_crawling.short_description = "Start Crawling"
@@ -62,7 +77,7 @@ class EpisodeAdmin(admin.ModelAdmin):
         "id",
         "title",
         "book",
-        "get_image_count",
+        "image_stats",
         "view_images",
         "all_images",
         "has_pdf",
@@ -71,13 +86,38 @@ class EpisodeAdmin(admin.ModelAdmin):
     search_fields = ("title", "book__title")
     list_filter = ("book__tags", "book__title")
     readonly_fields = ("book", "title", "id", "raw_url")
-    actions = ["get_images", "convert_to_pdf", "convert_to_pdf_force", "refresh_images"]
+    actions = ["get_images", "do_convert_to_pdf", "convert_to_pdf_force", "refresh_images"]
 
-    def get_image_count(self, obj):
-        """Get the count of images for this episode"""
-        return f'{obj.images.exclude(image="").count()}/{obj.images.count()}'
+    def get_queryset(self, request):
+        """预计算图片统计，避免 N+1 查询"""
+        queryset = super().get_queryset(request)
+        queryset = queryset.select_related("book")
+        queryset = queryset.annotate(
+            total_images=Count("images"),
+            completed_images=Count("images", filter=~Q(images__image="")),
+        )
+        return queryset
 
-    get_image_count.short_description = "Number of Images"
+    def image_stats(self, obj):
+        """使用预计算的图片统计"""
+        return f"{obj.completed_images}/{obj.total_images}"
+
+    image_stats.short_description = "Images"
+    image_stats.admin_order_field = "completed_images"
+
+    def all_images(self, obj):
+        """使用预计算值判断图片是否完整"""
+        return obj.completed_images == obj.total_images and obj.total_images > 0
+
+    all_images.short_description = "Complete"
+    all_images.boolean = True
+
+    def has_pdf(self, obj):
+        """Check if this episode has a PDF"""
+        return bool(obj.pdf)
+
+    has_pdf.short_description = "PDF"
+    has_pdf.boolean = True
 
     def read_episode(self, obj):
         """Generate a link to read this episode"""
@@ -87,20 +127,6 @@ class EpisodeAdmin(admin.ModelAdmin):
 
     read_episode.short_description = "Read"
 
-    def all_images(self, obj):
-        """Check if all images for this episode are present"""
-        return not obj.images.filter(image="").exists()
-
-    all_images.short_description = "All Images"
-    all_images.boolean = True
-
-    def has_pdf(self, obj):
-        """Check if this episode has a PDF"""
-        return bool(obj.pdf)
-
-    has_pdf.short_description = "Has PDF"
-    has_pdf.boolean = True
-
     def view_images(self, obj):
         """Generate a link to view images of this episode"""
         return format_html(
@@ -108,74 +134,67 @@ class EpisodeAdmin(admin.ModelAdmin):
             f"/admin/apps/image/?episode__id__exact={obj.id}",
         )
 
-    view_images.short_description = "View Images"
+    view_images.short_description = "Images"
 
-    def convert_to_pdf(self, request, queryset):
+    def do_convert_to_pdf(self, request, queryset):
         """Convert selected episodes to PDF"""
-        for episode in queryset:
-            convert_to_pdf.apply_async(args=[episode.id])
+        for episode_id in queryset.values_list("id", flat=True):
+            convert_to_pdf.apply_async(args=[episode_id])
 
-    convert_to_pdf.short_description = "Convert to PDF"
+    do_convert_to_pdf.short_description = "Convert to PDF"
 
     def convert_to_pdf_force(self, request, queryset):
         """Force convert selected episodes to PDF"""
-        for episode in queryset:
-            convert_to_pdf.apply_async(args=[episode.id, True])
+        for episode_id in queryset.values_list("id", flat=True):
+            convert_to_pdf.apply_async(args=[episode_id, True])
 
     convert_to_pdf_force.short_description = "Convert to PDF (Force)"
 
     def get_images(self, request, queryset):
         """Download images for selected episodes"""
-        for episode_id in queryset.only("id").values_list("id", flat=True).iterator():
+        for episode_id in queryset.values_list("id", flat=True):
             find_images.apply_async(args=[episode_id, True])
 
     get_images.short_description = "Download Images (Force)"
 
     def refresh_images(self, request, queryset):
         """Refresh images for selected episodes"""
-        for episode in queryset:
-            find_images.apply_async(args=[episode.id])
+        for episode_id in queryset.values_list("id", flat=True):
+            find_images.apply_async(args=[episode_id])
 
     refresh_images.short_description = "Find & Download Images"
 
 
 @admin.register(Image)
 class ImageAdmin(admin.ModelAdmin):
-    list_display = ("id", "episode", "index", "get_image_display")
+    list_display = ("id", "episode", "index", "has_image")
     search_fields = ("episode__title", "id")
     list_filter = ("episode__book",)
-    readonly_fields = ("episode", "index", "id", "raw_url", "image")
+    readonly_fields = ("episode", "index", "id", "raw_url")
     actions = ["get_images"]
 
-    def get_image_display(self, obj):
-        """Display the image in the admin panel"""
-        try:
-            return format_html(
-                f'<img src="data:image/jpeg;base64,{obj.image}" width="100" height="100"/>',
-            )
-        except Exception as e:
-            return str(e)
+    # 不在列表页显示图片预览，太慢
+    # 如需查看图片，点击进入详情页
 
-    get_image_display.short_description = "Image"
+    def has_image(self, obj):
+        """显示是否有图片，而不是显示图片本身"""
+        return bool(obj.image)
 
-    def episode_link(self, obj):
-        """Generate a link to view the episode for this image"""
-        return format_html(
-            '<a href="{}">{}</a>', obj.episode.get_admin_url(), obj.episode.title
-        )
-
-    episode_link.short_description = "Episode"
+    has_image.short_description = "Has Image"
+    has_image.boolean = True
 
     def get_queryset(self, request):
-        """Optimize queryset by selecting related episode"""
+        """优化查询，排除大字段"""
         queryset = super().get_queryset(request)
-        queryset = queryset.select_related("episode")
+        queryset = queryset.select_related("episode", "episode__book")
+        # 列表页不加载 image 字段（太大）
+        queryset = queryset.defer("image")
         return queryset
 
     def get_images(self, request, queryset):
-        """Download images for selected episodes"""
-        download_images.apply_async(
-            args=[list(queryset.only("id").values_list("id", flat=True))]
-        )
+        """Download images for selected images"""
+        image_ids = list(queryset.values_list("id", flat=True))
+        if image_ids:
+            download_images.apply_async(args=[image_ids])
 
     get_images.short_description = "Download Images (Force)"

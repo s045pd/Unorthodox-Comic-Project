@@ -1,8 +1,8 @@
 import asyncio
+import atexit
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from io import BytesIO
 from logging import getLogger
-from subprocess import DEVNULL, PIPE, Popen
 
 from PIL import Image as PILImage
 from reportlab.lib.pagesizes import A4
@@ -11,8 +11,34 @@ from reportlab.pdfgen import canvas
 
 logger = getLogger(__name__)
 
+# ============== 全局 Executor 池 ==============
+_thread_pool = None
+_process_pool = None
+
+
+def get_thread_pool(max_workers: int = 4) -> ThreadPoolExecutor:
+    """获取全局线程池"""
+    global _thread_pool
+    if _thread_pool is None:
+        _thread_pool = ThreadPoolExecutor(max_workers=max_workers)
+        atexit.register(_thread_pool.shutdown, wait=False)
+    return _thread_pool
+
+
+def get_process_pool(max_workers: int = 2) -> ProcessPoolExecutor:
+    """获取全局进程池"""
+    global _process_pool
+    if _process_pool is None:
+        _process_pool = ProcessPoolExecutor(max_workers=max_workers)
+        atexit.register(_process_pool.shutdown, wait=False)
+    return _process_pool
+
+
+# ============== 图片处理函数 ==============
+
 
 def load_and_convert_image(image):
+    """加载并转换图片为 RGB 模式"""
     try:
         img = PILImage.open(BytesIO(image))
         if img.mode != "RGB":
@@ -24,6 +50,7 @@ def load_and_convert_image(image):
 
 
 def combine_images(images):
+    """将多张图片拼接成长图"""
     # Process and combine images
     image_list = []
     total_height = 0
@@ -36,17 +63,25 @@ def combine_images(images):
             total_height += img.height
             max_width = max(max_width, img.width)
 
+    if not image_list:
+        return None
+
     # Combine all images into one long image
     combined_image = PILImage.new("RGB", (max_width, total_height))
     y_offset = 0
     for img in image_list:
         combined_image.paste(img, (0, y_offset))
         y_offset += img.height
+        img.close()  # 及时释放内存
 
     return combined_image
 
 
 def create_pdf(img):
+    """将长图转换为 PDF"""
+    if img is None:
+        return None
+
     # Calculate dimensions and scaling
     img_width, img_height = img.size
     pdf_width, pdf_height = A4
@@ -81,6 +116,7 @@ def create_pdf(img):
                 f"Original crop box: top={top}, bottom={bottom}, "
                 f"cropped_img.height={cropped_img.height}, scale={scale}"
             )
+            cropped_img.close()
             continue
 
         cropped_img = cropped_img.resize((new_width, new_height))
@@ -98,6 +134,7 @@ def create_pdf(img):
             height=cropped_img.height,
         )
 
+        cropped_img.close()  # 及时释放内存
         pdf_canvas.showPage()
 
     pdf_canvas.save()
@@ -108,53 +145,20 @@ def create_pdf(img):
     return buffer
 
 
+# ============== 异步包装函数 ==============
+
+
 async def images_to_long_image(images, use_process_pool=False):
+    """异步拼接图片，使用全局 Executor 池"""
     loop = asyncio.get_event_loop()
-    if use_process_pool:
-        with ProcessPoolExecutor() as executor:
-            return await loop.run_in_executor(executor, combine_images, images)
-    else:
-        with ThreadPoolExecutor() as executor:
-            return await loop.run_in_executor(executor, combine_images, images)
+    executor = get_process_pool() if use_process_pool else get_thread_pool()
+    # 需要将生成器转换为列表
+    images_list = list(images) if not isinstance(images, list) else images
+    return await loop.run_in_executor(executor, combine_images, images_list)
 
 
 async def long_image_to_pdf(img, use_process_pool=False):
+    """异步生成 PDF，使用全局 Executor 池"""
     loop = asyncio.get_event_loop()
-    if use_process_pool:
-        with ProcessPoolExecutor() as executor:
-            return await loop.run_in_executor(executor, create_pdf, img)
-    else:
-        with ThreadPoolExecutor() as executor:
-            return await loop.run_in_executor(executor, create_pdf, img)
-
-
-def run_cmd(code, sync: bool = True, shell=True) -> None | str | bytes:
-    p = Popen(
-        code,
-        shell=shell,
-        **(
-            {"stdout": PIPE, "stderr": PIPE}
-            if sync
-            else {
-                "stdin": None,
-                "stdout": DEVNULL,
-                "stderr": DEVNULL,
-                "close_fds": True,
-            }
-        ),
-    )
-    logger.debug(f"[PID:{p.pid} Sync:{sync}]\t{code}")
-    if not sync:
-        return
-    stdout, stderr = list(map(bytes.decode, p.communicate()))
-    if stderr:
-        logger.error(stderr)
-    logger.debug(stdout)
-    return stdout
-
-
-def curl(url: str) -> None:
-    return run_cmd(
-        code=f'curl -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0" -H "Accept-Language: en-GB,en;q=0.9,zh-CN;q=0.8,zh;q=0.7" -H "Cache-Control: max-age=0" -H "Dnt: 1" -H "Priority: u=0, i" {url}',
-        sync=True,
-    )
+    executor = get_process_pool() if use_process_pool else get_thread_pool()
+    return await loop.run_in_executor(executor, create_pdf, img)

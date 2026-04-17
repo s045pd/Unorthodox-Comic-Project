@@ -10,7 +10,7 @@
             "request": "launch",
             "args": [
                 "runserver",
-                "127.0.0.1:8002"
+                "0.0.0.0:8002"
             ],
             "django": true,
             "autoStartBrowser": false,
@@ -80,7 +80,7 @@
             "envFile": "${workspaceFolder}/.env",
             "args": [
                 "SE8.wsgi",
-                "--bind=127.0.0.1:8004",
+                "--bind=0.0.0.0:8004",
                 "--capture-output",
                 "--reload"
             ],

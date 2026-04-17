@@ -1,47 +1,78 @@
 import asyncio
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, List, Optional
 
-from fake_useragent import UserAgent
-from requests_html import HTML, AsyncHTMLSession
-
-from apps.tools import curl
+import aiohttp
+from requests_html import HTML
 
 
-class ImageExtractor:
-    _instance = None
+class HTTPClientManager:
+    """全局 HTTP 客户端管理器，复用连接池"""
 
-    def __new__(cls, *args, **kwargs):
-        """Implement Singleton pattern"""
+    _instance: Optional["HTTPClientManager"] = None
+    _session: Optional[aiohttp.ClientSession] = None
+    _lock: Optional[asyncio.Lock] = None
+
+    def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(ImageExtractor, cls).__new__(cls, *args, **kwargs)
+            cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self):
-        """Initialize ImageExtractor with necessary attributes"""
-        if not hasattr(self, "_initialized"):
-            self._initialized = True
-            self.origin = "https://se8.us"
-            self.cli = AsyncHTMLSession()
-            self.cli.headers.update(
-                {
-                    "User-Agent": UserAgent(os=["windows"], platforms="pc").chrome,
-                    "Accept-Language": "en-GB,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
-                    "Cache-Control": "max-age=0",
-                    "Dnt": "1",
-                    "Priority": "u=0, i",
-                }
-            )
-            self.max_page = 2000
+        if self._lock is None:
+            self._lock = asyncio.Lock()
 
-    async def _send_request(self, url: str, use_curl: bool = True) -> object:
-        """Send a GET request to the given URL"""
+    async def get_session(self) -> aiohttp.ClientSession:
+        """获取或创建 aiohttp session"""
+        async with self._lock:
+            if self._session is None or self._session.closed:
+                connector = aiohttp.TCPConnector(
+                    limit=100,  # 连接池大小
+                    limit_per_host=20,  # 每个 host 的连接数
+                    ttl_dns_cache=300,  # DNS 缓存 5 分钟
+                    keepalive_timeout=60,
+                )
+                timeout = aiohttp.ClientTimeout(total=60)
+                self._session = aiohttp.ClientSession(
+                    connector=connector,
+                    timeout=timeout,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0",
+                        "Accept-Language": "en-GB,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+                        "Cache-Control": "max-age=0",
+                        "Dnt": "1",
+                        "Priority": "u=0, i",
+                    },
+                )
+            return self._session
+
+    async def close(self):
+        """关闭 session"""
+        async with self._lock:
+            if self._session and not self._session.closed:
+                await self._session.close()
+                self._session = None
+
+
+# 全局 HTTP 客户端实例
+http_client = HTTPClientManager()
+
+
+class ImageExtractor:
+    """图片提取器，使用全局 HTTP 客户端"""
+
+    def __init__(self):
+        self.origin = "https://se8.us"
+        self.max_page = 2000
+
+    async def _send_request(self, url: str) -> HTML:
+        """使用 aiohttp 发送请求"""
         url = url.strip()
+        session = await http_client.get_session()
 
-        if use_curl:
-            resp = await asyncio.to_thread(curl, url)
-            return HTML(html=resp)
-
-        return await self.cli.get(url=url, headers={"referer": "https://se8.us/"})
+        async with session.get(url, headers={"referer": "https://se8.us/"}) as response:
+            response.raise_for_status()
+            html_text = await response.text()
+            return HTML(html=html_text)
 
     async def get_max_page(self) -> int:
         """Fetch the maximum page number"""
@@ -116,23 +147,45 @@ class ImageExtractor:
                 "raw_url": image_div.xpath("//img/@data-original")[0],
             }
 
-    async def download_image(self, url: str, key: str = None) -> str:
-        """Download and encode image from the given URL"""
-        resp = await self._send_request(url, use_curl=False)
-        if not resp.ok:
+    async def download_image(self, url: str, key: str = None) -> bytes | tuple | str:
+        """Download image from the given URL using global HTTP client"""
+        try:
+            session = await http_client.get_session()
+            async with session.get(
+                url, headers={"referer": "https://se8.us/"}
+            ) as response:
+                if response.status != 200:
+                    return ""
+                content_type = response.headers.get("Content-Type", "")
+                if not content_type.startswith("image"):
+                    return ""
+                content = await response.read()
+                if key:
+                    return (key, content)
+                return content
+        except Exception:
             return ""
-        if not resp.headers.get("Content-Type", "").startswith("image"):
-            return ""
-        if key:
-            return [key, resp.content]
-        return resp.content
 
-    async def get_images_concurrently(self, urls: List[str]) -> List[str]:
-        """Fetch images concurrently"""
-        tasks = [self.download_image(url) for url in urls]
+    async def get_images_concurrently(self, urls: List[str]) -> List[bytes]:
+        """Fetch images concurrently with semaphore control"""
+        semaphore = asyncio.Semaphore(20)
+
+        async def download_with_semaphore(url: str) -> bytes:
+            async with semaphore:
+                return await self.download_image(url)
+
+        tasks = [download_with_semaphore(url) for url in urls]
         return await asyncio.gather(*tasks)
 
-    async def get_images_concurrently_with_id(self, items: dict) -> List[str]:
-        """Fetch images concurrently"""
-        tasks = [self.download_image(url=url, key=key) for (key, url) in items]
+    async def get_images_concurrently_with_id(
+        self, items: List[tuple]
+    ) -> List[tuple]:
+        """Fetch images concurrently with id"""
+        semaphore = asyncio.Semaphore(20)
+
+        async def download_with_semaphore(key: str, url: str) -> tuple:
+            async with semaphore:
+                return await self.download_image(url, key)
+
+        tasks = [download_with_semaphore(key, url) for (key, url) in items]
         return await asyncio.gather(*tasks)

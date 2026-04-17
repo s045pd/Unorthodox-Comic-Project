@@ -151,8 +151,14 @@ CELERY_BEAT_SCHEDULE = {
 
 CELERY_ONCE = {
     "backend": "celery_once.backends.Redis",
-    "settings": {"url": CELERY_BROKER_URL, "default_timeout": 60 * 60},
+    "settings": {"url": CELERY_BROKER_URL, "default_timeout": 30 * 60},  # 30 分钟超时
 }
+
+# Celery 任务配置
+CELERY_TASK_SOFT_TIME_LIMIT = 30 * 60  # 软超时 30 分钟
+CELERY_TASK_TIME_LIMIT = 35 * 60  # 硬超时 35 分钟
+CELERY_TASK_ACKS_LATE = True  # 任务完成后才确认
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # 每次只取一个任务
 
 FILTERS_DEFAULT_LOOKUP_EXPR = "icontains"
 
@@ -250,26 +256,34 @@ LOGGING = {
         },
         "file": {
             "level": "INFO",
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "filename": str((LOGS_DIR / "app.log").absolute()),
+            "maxBytes": 10 * 1024 * 1024,  # 10MB
+            "backupCount": 5,
             "formatter": "verbose",
         },
         "sql": {
             "level": "DEBUG",
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "filename": str((LOGS_DIR / "sql.log").absolute()),
+            "maxBytes": 50 * 1024 * 1024,  # 50MB
+            "backupCount": 3,
             "formatter": "verbose",
         },
         "task": {
             "level": "INFO",
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "filename": str((LOGS_DIR / "task.log").absolute()),
+            "maxBytes": 20 * 1024 * 1024,  # 20MB
+            "backupCount": 5,
             "formatter": "verbose",
         },
         "celery": {
             "level": "INFO",
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "filename": str((LOGS_DIR / "celery.log").absolute()),
+            "maxBytes": 20 * 1024 * 1024,  # 20MB
+            "backupCount": 5,
             "formatter": "verbose",
         },
     },
