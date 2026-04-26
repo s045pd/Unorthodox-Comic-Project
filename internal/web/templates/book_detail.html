@@ -1,59 +1,59 @@
 {{define "book_detail"}}
 <!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{{.Title}} · SE8</title>
-  <link rel="stylesheet" href="/static/pico.min.css" />
-  <link rel="stylesheet" href="/static/app.css" />
-  <script src="/static/htmx.min.js"></script>
-</head>
+<head>{{template "head_assets" .}}</head>
 <body>
-  <main class="container">
-    <nav class="app-nav">
-      <strong>SE8</strong>
-      <a href="/books">Books</a>
-      <a href="/episodes">Episodes</a>
-      <a href="/tags">Tags</a>
-      <a href="/jobs">Jobs</a>
-      <span class="spacer"></span>
-      <form action="/admin/start-crawl" method="post" style="margin:0">
-        <button type="submit" class="secondary">Start Crawl</button>
-      </form>
-      <form action="/logout" method="post" style="margin:0">
-        <button type="submit" class="outline">Logout</button>
-      </form>
-    </nav>
-    {{with .Book}}
-    <article>
-      <hgroup>
+  {{template "masthead" .}}
+  <main class="shell">
+    <header class="page-head">
+      <div>
+        <p class="crumb">SECTION <b>// 01.{{with .Book}}{{.ID}}{{end}}</b> · BOOK FILE</p>
         <h1>{{.Title}}</h1>
-        <h2>hot: {{.Hot}}</h2>
-      </hgroup>
-      {{if .CoverPath}}<img src="/{{.CoverPath}}" style="max-width:180px"/>{{end}}
-      <p>{{.Description}}</p>
-    </article>
+      </div>
+      <div class="meta">
+        <span>EPISODES</span>
+        <b>{{len .Episodes}}</b>
+        {{with .Book}}<span>HOT {{.Hot}}</span>{{end}}
+      </div>
+    </header>
+
+    {{with .Book}}
+    <section class="book-hero">
+      <div class="cv{{if not .CoverPath}} empty{{end}}">
+        {{if .CoverPath}}<img src="/{{.CoverPath}}" alt="" />{{end}}
+      </div>
+      <div class="info">
+        <span class="section-label red">DOSSIER · ID·{{.ID}}</span>
+        <h2>{{.Title}}</h2>
+        <span class="stat">HOT <b>{{.Hot}}</b></span>
+        {{if .RawURL}}<span class="stat">SRC <b>EXT</b></span>{{end}}
+        {{if .Description}}<p>{{.Description}}</p>{{end}}
+      </div>
+    </section>
     {{end}}
-    <h2>Episodes</h2>
-    <table class="data striped">
-      <thead><tr><th>ID</th><th>Title</th><th>Images</th><th>PDF</th><th></th></tr></thead>
-      <tbody>
+
+    <span class="section-label">▮ EPISODES INDEX</span>
+    {{if .Episodes}}
+    <div class="zlist">
       {{range .Episodes}}
-        <tr>
-          <td>{{.ID}}</td>
-          <td>{{.Title}}</td>
-          <td>{{.Completed}}/{{.Total}}</td>
-          <td>{{if .PDFPath}}<a href="/{{.PDFPath}}">PDF</a>{{end}}</td>
-          <td>
-            <a role="button" class="secondary outline" href="/episodes/{{.ID}}">Read</a>
-            <button hx-post="/episodes/{{.ID}}/fetch" hx-swap="outerHTML">Fetch</button>
-            <button hx-post="/episodes/{{.ID}}/pdf" hx-swap="outerHTML">PDF</button>
-          </td>
-        </tr>
+      <div class="zrow ep">
+        <span class="id">№{{.ID}}</span>
+        <h4 class="title">{{.Title}}</h4>
+        <div class="progress-bar" title="{{.Completed}}/{{.Total}}">
+          <span style="width:{{if gt .Total 0}}{{div (mul .Completed 100) .Total}}{{else}}0{{end}}%"></span>
+        </div>
+        <span class="pdf">{{if .PDFPath}}<a class="btn tiny" href="/{{.PDFPath}}">▾ PDF</a>{{else}}<span class="code">no.pdf</span>{{end}}</span>
+        <div class="actions">
+          <a class="btn tiny" href="/episodes/{{.ID}}">▸ READ</a>
+          <button class="btn tiny ghost" hx-post="/episodes/{{.ID}}/fetch" hx-swap="outerHTML">↻ FETCH</button>
+          <button class="btn tiny red" hx-post="/episodes/{{.ID}}/pdf" hx-swap="outerHTML">▾ MAKE PDF</button>
+        </div>
+      </div>
       {{end}}
-      </tbody>
-    </table>
+    </div>
+    {{else}}
+    <div class="empty"><span class="big">∅</span>NO EPISODES INDEXED</div>
+    {{end}}
   </main>
 </body>
 </html>

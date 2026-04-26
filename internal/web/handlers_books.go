@@ -94,7 +94,7 @@ func (s *Server) handleBookCrawl(w http.ResponseWriter, r *http.Request) {
 	_ = s.Queue.Enqueue(r.Context(), "find_episodes", "find_episodes:"+id,
 		map[string]any{"book_id": id})
 	if r.Header.Get("HX-Request") == "true" {
-		w.Write([]byte(`<span>Queued ✓</span>`))
+		w.Write([]byte(`<span class="flash">▶ CRAWL QUEUED</span>`))
 		return
 	}
 	http.Redirect(w, r, "/books/"+id, http.StatusFound)

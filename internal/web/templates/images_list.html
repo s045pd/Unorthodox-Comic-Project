@@ -1,46 +1,38 @@
 {{define "images_list"}}
 <!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{{.Title}} · SE8</title>
-  <link rel="stylesheet" href="/static/pico.min.css" />
-  <link rel="stylesheet" href="/static/app.css" />
-  <script src="/static/htmx.min.js"></script>
-</head>
+<head>{{template "head_assets" .}}</head>
 <body>
-  <main class="container">
-    <nav class="app-nav">
-      <strong>SE8</strong>
-      <a href="/books">Books</a>
-      <a href="/episodes">Episodes</a>
-      <a href="/tags">Tags</a>
-      <a href="/jobs">Jobs</a>
-      <span class="spacer"></span>
-      <form action="/admin/start-crawl" method="post" style="margin:0">
-        <button type="submit" class="secondary">Start Crawl</button>
-      </form>
-      <form action="/logout" method="post" style="margin:0">
-        <button type="submit" class="outline">Logout</button>
-      </form>
-    </nav>
-    <h1>Images</h1>
-    <table class="data striped">
-      <thead><tr><th>ID</th><th>Episode</th><th>#</th><th>Bytes</th><th>Has File</th><th></th></tr></thead>
-      <tbody>
+  {{template "masthead" .}}
+  <main class="shell">
+    <header class="page-head">
+      <div>
+        <p class="crumb">SECTION <b>// 04</b> · ASSET INVENTORY</p>
+        <h1>{{.Title}}<br/>VAULT</h1>
+      </div>
+      <div class="meta">
+        <span>RECORDS</span>
+        <b>{{len .Images}}</b>
+      </div>
+    </header>
+
+    <span class="section-label">▮ FRAME-BY-FRAME · LIMIT 500</span>
+    {{if .Images}}
+    <div class="zlist">
       {{range .Images}}
-        <tr>
-          <td>{{.ID}}</td>
-          <td><a href="/episodes/{{.EpisodeID}}">{{.EpisodeID}}</a></td>
-          <td>{{.Index}}</td>
-          <td>{{.Bytes}}</td>
-          <td>{{if .HasFile}}&#x2705;{{else}}&#x274C;{{end}}</td>
-          <td><button hx-post="/images/{{.ID}}/redownload" hx-swap="outerHTML">Redownload</button></td>
-        </tr>
+      <div class="zrow img">
+        <span class="id">№{{.ID}}</span>
+        <span><a href="/episodes/{{.EpisodeID}}" style="color:var(--blood);text-decoration:none;font-family:var(--t-mono)">CH·{{.EpisodeID}}</a></span>
+        <span><b>P{{printf "%03d" .Index}}</b></span>
+        <span><span class="code">{{.Bytes}} B</span></span>
+        <span>{{if .HasFile}}<span class="pill done">SAVED</span>{{else}}<span class="pill failed">MISSING</span>{{end}}</span>
+        <div class="actions"><button class="btn tiny red" hx-post="/images/{{.ID}}/redownload" hx-swap="outerHTML">↻ REFETCH</button></div>
+      </div>
       {{end}}
-      </tbody>
-    </table>
+    </div>
+    {{else}}
+    <div class="empty"><span class="big">∅</span>NO IMAGES INDEXED</div>
+    {{end}}
   </main>
 </body>
 </html>

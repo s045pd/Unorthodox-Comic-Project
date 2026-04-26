@@ -1,34 +1,31 @@
 {{define "tags_list"}}
 <!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{{.Title}} · SE8</title>
-  <link rel="stylesheet" href="/static/pico.min.css" />
-  <link rel="stylesheet" href="/static/app.css" />
-  <script src="/static/htmx.min.js"></script>
-</head>
+<head>{{template "head_assets" .}}</head>
 <body>
-  <main class="container">
-    <nav class="app-nav">
-      <strong>SE8</strong>
-      <a href="/books">Books</a>
-      <a href="/episodes">Episodes</a>
-      <a href="/tags">Tags</a>
-      <a href="/jobs">Jobs</a>
-      <span class="spacer"></span>
-      <form action="/admin/start-crawl" method="post" style="margin:0">
-        <button type="submit" class="secondary">Start Crawl</button>
-      </form>
-      <form action="/logout" method="post" style="margin:0">
-        <button type="submit" class="outline">Logout</button>
-      </form>
-    </nav>
-    <h1>Tags</h1>
-    <ul>
-      {{range .Tags}}<li>{{.Name}} — {{.Count}} books</li>{{end}}
-    </ul>
+  {{template "masthead" .}}
+  <main class="shell">
+    <header class="page-head">
+      <div>
+        <p class="crumb">SECTION <b>// 03</b> · TAXONOMY</p>
+        <h1>{{.Title}}<br/>CLOUD</h1>
+      </div>
+      <div class="meta">
+        <span>UNIQUE TAGS</span>
+        <b>{{len .Tags}}</b>
+      </div>
+    </header>
+
+    <span class="section-label">▮ INDEXED LABELS</span>
+    {{if .Tags}}
+    <div class="tag-cloud">
+      {{range .Tags}}
+        <a class="tag" href="/books?tag={{.Name}}">{{.Name}}<em>{{.Count}}</em></a>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="empty"><span class="big">∅</span>NO TAGS YET</div>
+    {{end}}
   </main>
 </body>
 </html>

@@ -130,7 +130,7 @@ func (s *Server) handleEpisodeFetch(w http.ResponseWriter, r *http.Request) {
 		"find_images:"+strconv.FormatInt(id, 10),
 		map[string]any{"episode_id": id, "force": true})
 	if r.Header.Get("HX-Request") == "true" {
-		w.Write([]byte(`<span>Fetch queued ✓</span>`))
+		w.Write([]byte(`<span class="flash">↻ FETCH QUEUED</span>`))
 		return
 	}
 	http.Redirect(w, r, safeReferer(r, "/episodes"), http.StatusFound)
@@ -143,7 +143,7 @@ func (s *Server) handleEpisodePDF(w http.ResponseWriter, r *http.Request) {
 		"convert_pdf:"+strconv.FormatInt(id, 10),
 		map[string]any{"episode_id": id, "force": force})
 	if r.Header.Get("HX-Request") == "true" {
-		w.Write([]byte(`<span>PDF queued ✓</span>`))
+		w.Write([]byte(`<span class="flash">▾ PDF QUEUED</span>`))
 		return
 	}
 	http.Redirect(w, r, safeReferer(r, "/episodes"), http.StatusFound)

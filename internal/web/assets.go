@@ -26,6 +26,13 @@ func LoadTemplates() (*template.Template, error) {
 	funcs := template.FuncMap{
 		"add": func(a, b int) int { return a + b },
 		"sub": func(a, b int) int { return a - b },
+		"mul": func(a, b int) int { return a * b },
+		"div": func(a, b int) int {
+			if b == 0 {
+				return 0
+			}
+			return a / b
+		},
 	}
 	return template.New("").Funcs(funcs).ParseFS(templatesFS, "templates/*.html")
 }

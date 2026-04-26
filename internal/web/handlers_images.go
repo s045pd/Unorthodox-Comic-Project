@@ -54,7 +54,7 @@ func (s *Server) handleImageRedownload(w http.ResponseWriter, r *http.Request) {
 		"download_image:"+strconv.FormatInt(id, 10),
 		map[string]any{"image_id": id})
 	if r.Header.Get("HX-Request") == "true" {
-		w.Write([]byte(`<span>Queued ✓</span>`))
+		w.Write([]byte(`<span class="flash">↻ REFETCH QUEUED</span>`))
 		return
 	}
 	http.Redirect(w, r, safeReferer(r, "/images"), http.StatusFound)

@@ -1,39 +1,40 @@
 {{define "episode_read"}}
 <!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{{.Title}} · SE8</title>
-  <link rel="stylesheet" href="/static/pico.min.css" />
-  <link rel="stylesheet" href="/static/app.css" />
-  <script src="/static/htmx.min.js"></script>
-</head>
+<head>{{template "head_assets" .}}</head>
 <body>
-  <main class="container">
-    <nav class="app-nav">
-      <strong>SE8</strong>
-      <a href="/books">Books</a>
-      <a href="/episodes">Episodes</a>
-      <a href="/tags">Tags</a>
-      <a href="/jobs">Jobs</a>
-      <span class="spacer"></span>
-      <form action="/admin/start-crawl" method="post" style="margin:0">
-        <button type="submit" class="secondary">Start Crawl</button>
-      </form>
-      <form action="/logout" method="post" style="margin:0">
-        <button type="submit" class="outline">Logout</button>
-      </form>
-    </nav>
-    <nav>
-      <a href="/books/{{.BookID}}">← Back to book</a>
-    </nav>
-    <h1>{{.Title}}</h1>
-    <section class="read-page">
+  {{template "masthead" .}}
+  <main class="shell">
+    <header class="page-head">
+      <div>
+        <p class="crumb"><a href="/books/{{.BookID}}" style="color:var(--blood);text-decoration:none">◂ {{.BookID}}</a> <b>// CHAPTER {{.ID}}</b></p>
+        <h1>{{.Title}}</h1>
+      </div>
+      <div class="meta">
+        <span>PAGES</span>
+        <b>{{len .Paths}}</b>
+      </div>
+    </header>
+
+    <div class="reader-bar">
+      <span>▶ READING · CH{{.ID}}</span>
+      <span><a href="/books/{{.BookID}}">▮ EXIT TO BOOK</a></span>
+    </div>
+
+    {{if .Paths}}
+    <section class="reader">
       {{range .Paths}}
         {{if .}}<img src="/{{.}}" loading="lazy" alt=""/>{{end}}
       {{end}}
     </section>
+    {{else}}
+    <div class="empty"><span class="big">∅</span>NO IMAGES YET · TRIGGER ↻ FETCH FROM BOOK PAGE</div>
+    {{end}}
+
+    <div class="reader-bar">
+      <span>▮ END OF CHAPTER</span>
+      <span><a href="/books/{{.BookID}}">▸ BACK TO BOOK</a></span>
+    </div>
   </main>
 </body>
 </html>

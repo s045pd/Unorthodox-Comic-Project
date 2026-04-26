@@ -9,10 +9,11 @@ vendor/
 vol/
 !vol/.gitkeep
 
-# Legacy Python
-legacy/.venv/
-legacy/**/__pycache__/
-legacy/**/*.pyc
+# Python virtualenvs and caches (anywhere)
+.venv/
+venv/
+**/__pycache__/
+**/*.pyc
 
 # IDE
 .vscode/

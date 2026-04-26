@@ -1,0 +1,34 @@
+{{define "head_assets"}}
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{.Title}} ▮ SE8 ARCHIVE</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Stencil+Display:wght@700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/zine.css" />
+  <script src="/static/htmx.min.js"></script>
+{{end}}
+
+{{define "masthead"}}
+<header class="mast">
+  <div class="mast-inner">
+    <a href="/books" class="mast-logo" style="color:inherit;text-decoration:none">SE8</a>
+    <span class="mast-edition">// BACKEND ARCHIVE · ED.001</span>
+    <span class="mast-stamp">CONFIDENTIAL</span>
+    <span class="mast-spacer"></span>
+    <span class="mast-stamp">{{.Title}}</span>
+    <form action="/admin/start-crawl" method="post"><button type="submit" class="btn primary">▶ START CRAWL</button></form>
+    <form action="/logout" method="post"><button type="submit" class="btn">LOGOUT ↻</button></form>
+  </div>
+</header>
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/books">Books</a>
+    <a href="/episodes">Episodes</a>
+    <a href="/tags">Tags</a>
+    <a href="/jobs">Jobs</a>
+    <a href="/images">Images</a>
+    <span class="nav-tail">— sec/{{.Title}}</span>
+  </div>
+</nav>
+{{end}}
