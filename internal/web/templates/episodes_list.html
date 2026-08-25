@@ -7,15 +7,24 @@
   <main class="shell">
     <header class="page-head">
       <div>
-        <p class="crumb">SECTION <b>// 02</b> · CHAPTER LOG</p>
+        <p class="crumb">SECTION <b>// 02</b> · CHAPTER LOG{{if .BookFilter}} · BOOK <b>{{.BookFilter}}</b>{{end}}</p>
         <h1>{{.Title}}<br/>STREAM</h1>
       </div>
       <div class="meta">
-        <span>VISIBLE</span>
-        <b>{{len .Episodes}}</b>
+        <span>{{if .BookFilter}}MATCHED{{else}}TOTAL{{end}}</span>
+        <b>{{.Total}}</b>
         <span>PAGE {{.Page}}</span>
       </div>
     </header>
+
+    <form class="filter-bar" method="get" action="/episodes" role="search">
+      <input type="search" name="book" value="{{.BookFilter}}" placeholder="FILTER BY BOOK ID…" autocomplete="off"/>
+      <button type="submit" class="btn tiny">▸ FILTER</button>
+      {{if .BookFilter}}
+        <a class="btn tiny ghost" href="/episodes">✕ CLEAR</a>
+        <span class="filter-chip">▮ BOOK · <b>{{.BookFilter}}</b> <a href="/books/{{.BookFilter}}" title="open book">↗</a></span>
+      {{end}}
+    </form>
 
     <span class="section-label">▮ LATEST CHAPTERS · DESCENDING</span>
     {{if .Episodes}}
@@ -23,28 +32,27 @@
       {{range .Episodes}}
       <div class="zrow ep">
         <span class="id">№{{.ID}}</span>
-        <h4 class="title">{{.Title}} <a href="/books/{{.BookID}}" style="color:var(--blood);text-decoration:none;font-family:var(--t-mono);font-size:10px;letter-spacing:0.16em">→ {{.BookID}}</a></h4>
+        <h4 class="title">{{.Title}} <a href="/episodes?book={{.BookID}}" style="color:var(--blood);text-decoration:none;font-family:var(--t-mono);font-size:10px;letter-spacing:0.16em">→ {{.BookID}}</a></h4>
         <div class="progress-bar" title="{{.Completed}}/{{.Total}}">
           <span style="width:{{if gt .Total 0}}{{div (mul .Completed 100) .Total}}{{else}}0{{end}}%"></span>
         </div>
-        <span class="pdf">{{if .PDFPath}}<a class="btn tiny" href="/{{.PDFPath}}">▾ PDF</a>{{else}}<span class="code">no.pdf</span>{{end}}</span>
+        <span class="count" style="font-family:var(--t-mono);font-size:11px;color:var(--mute)">{{.Completed}}/{{.Total}}</span>
         <div class="actions">
           <a class="btn tiny" href="/episodes/{{.ID}}">▸ READ</a>
-          <button class="btn tiny ghost" hx-post="/episodes/{{.ID}}/fetch" hx-swap="outerHTML">↻ FETCH</button>
-          <button class="btn tiny red" hx-post="/episodes/{{.ID}}/pdf" hx-swap="outerHTML">▾ PDF</button>
+          {{if and $.Session $.Session.IsAdmin}}<button class="btn tiny ghost" hx-post="/episodes/{{.ID}}/fetch" hx-swap="outerHTML">↻ FETCH</button>{{end}}
         </div>
       </div>
       {{end}}
     </div>
     {{else}}
-    <div class="empty"><span class="big">∅</span>NO CHAPTERS</div>
+    <div class="empty"><span class="big">∅</span>{{if .BookFilter}}NO CHAPTERS FOR THIS BOOK{{else}}NO CHAPTERS{{end}}</div>
     {{end}}
 
     <nav class="pager">
-      <span>PAGE <b>{{.Page}}</b></span>
+      <span>PAGE <b>{{.Page}}</b> OF <b>{{if gt .Total 0}}{{div (sub (add .Total .Limit) 1) .Limit}}{{else}}1{{end}}</b></span>
       <span class="marker"></span>
-      {{if gt .Page 1}}<a class="btn tiny" href="?page={{sub .Page 1}}">◂ PREV</a>{{end}}
-      <a class="btn tiny" href="?page={{add .Page 1}}">NEXT ▸</a>
+      {{if gt .Page 1}}<a class="btn tiny" href="?page={{sub .Page 1}}{{if .BookFilter}}&book={{.BookFilter}}{{end}}">◂ PREV</a>{{end}}
+      {{if gt .Total (mul .Page .Limit)}}<a class="btn tiny" href="?page={{add .Page 1}}{{if .BookFilter}}&book={{.BookFilter}}{{end}}">NEXT ▸</a>{{end}}
     </nav>
   </main>
 </body>

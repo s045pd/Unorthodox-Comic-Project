@@ -12,15 +12,16 @@
       </div>
       <div class="meta">
         <span>EPISODES</span>
-        <b>{{len .Episodes}}</b>
+        <b>{{.TotalEps}}</b>
         {{with .Book}}<span>HOT {{.Hot}}</span>{{end}}
       </div>
     </header>
 
     {{with .Book}}
     <section class="book-hero">
-      <div class="cv{{if not .CoverPath}} empty{{end}}">
-        {{if .CoverPath}}<img src="/{{.CoverPath}}" alt="" />{{end}}
+      <div class="cv{{if and (not .CoverPath) (not .ImageURL)}} empty{{end}}">
+        {{if .CoverPath}}<img src="/{{.CoverPath}}" alt="" loading="lazy" />
+        {{else if .ImageURL}}<img src="{{.ImageURL}}" alt="" referrerpolicy="no-referrer" loading="lazy"/>{{end}}
       </div>
       <div class="info">
         <span class="section-label red">DOSSIER · ID·{{.ID}}</span>
@@ -32,29 +33,83 @@
     </section>
     {{end}}
 
-    <span class="section-label">▮ EPISODES INDEX</span>
+    {{with .Bookmark}}
+    <a class="continue-banner" href="/episodes/{{.EpisodeID}}#bookmark">
+      <span class="cb-tag">▶ CONTINUE READING</span>
+      <span class="cb-meta">
+        <b>{{.EpTitle}}</b>
+        <small>PAGE {{add .ImageIdx 1}} / {{.TotalPages}} · {{.UpdatedAt.Format "01-02 15:04"}}</small>
+      </span>
+      <span class="cb-arrow">▸</span>
+    </a>
+    {{end}}
+
+    <span class="section-label">▮ EPISODES INDEX · {{.TotalEps}} TOTAL</span>
+
+    {{with .Book}}
+    <form class="filter-bar" method="get" action="/books/{{.ID}}" role="search">
+      <input type="search" name="q" value="{{$.Q}}" placeholder="FILTER CHAPTERS BY TITLE…" autocomplete="off"/>
+      <button type="submit" class="btn tiny">▸ FILTER</button>
+      {{if $.Q}}<a class="btn tiny ghost" href="/books/{{.ID}}">✕ CLEAR</a>{{end}}
+    </form>
+    {{end}}
+
     {{if .Episodes}}
-    <div class="zlist">
-      {{range .Episodes}}
-      <div class="zrow ep">
-        <span class="id">№{{.ID}}</span>
-        <h4 class="title">{{.Title}}</h4>
-        <div class="progress-bar" title="{{.Completed}}/{{.Total}}">
-          <span style="width:{{if gt .Total 0}}{{div (mul .Completed 100) .Total}}{{else}}0{{end}}%"></span>
-        </div>
-        <span class="pdf">{{if .PDFPath}}<a class="btn tiny" href="/{{.PDFPath}}">▾ PDF</a>{{else}}<span class="code">no.pdf</span>{{end}}</span>
-        <div class="actions">
-          <a class="btn tiny" href="/episodes/{{.ID}}">▸ READ</a>
-          <button class="btn tiny ghost" hx-post="/episodes/{{.ID}}/fetch" hx-swap="outerHTML">↻ FETCH</button>
-          <button class="btn tiny red" hx-post="/episodes/{{.ID}}/pdf" hx-swap="outerHTML">▾ MAKE PDF</button>
-        </div>
+    <div class="zlist" id="ep-list">
+      {{template "book_episode_rows" .}}
+      {{if .HasMore}}
+      <div id="ep-more"
+           hx-get="/books/{{.Book.ID}}/episodes?offset={{.NextOffset}}{{if .Q}}&q={{.Q}}{{end}}"
+           hx-trigger="revealed"
+           hx-swap="outerHTML">
+        <div class="zrow ep-loading"><span class="ep-loading-dot">·</span><span class="ep-loading-dot">·</span><span class="ep-loading-dot">·</span> LOADING NEXT {{.PageSize}}…</div>
       </div>
       {{end}}
     </div>
     {{else}}
-    <div class="empty"><span class="big">∅</span>NO EPISODES INDEXED</div>
+    <div class="empty"><span class="big">∅</span>{{if .Q}}NO CHAPTERS MATCH “{{.Q}}”{{else}}NO EPISODES INDEXED{{end}}</div>
     {{end}}
   </main>
 </body>
 </html>
+{{end}}
+
+{{/* Inline rows used both on initial render and inside the htmx partial. */}}
+{{define "book_episode_rows"}}
+{{range .Episodes}}
+{{$done := and (gt .Total 0) (eq .Completed .Total)}}
+<div class="zrow ep{{if $done}} ep-done{{end}}">
+  <span class="id">№{{.ID}}</span>
+  <h4 class="title">{{.Title}}</h4>
+  {{if $done}}
+    <span class="ep-status done" title="{{.Total}} pages archived">✓ COMPLETE</span>
+    <span></span>
+  {{else if eq .Total 0}}
+    <span class="ep-status pending">◌ PENDING</span>
+    <span></span>
+  {{else}}
+    <div class="progress-bar" title="{{.Completed}}/{{.Total}}">
+      <span style="width:{{div (mul .Completed 100) .Total}}%"></span>
+    </div>
+    <span class="count">{{.Completed}}/{{.Total}}</span>
+  {{end}}
+  <div class="actions">
+    <a class="btn tiny" href="/episodes/{{.ID}}">▸ READ</a>
+    {{if and $.Session $.Session.IsAdmin}}<button class="btn tiny ghost" hx-post="/episodes/{{.ID}}/fetch" hx-swap="outerHTML">↻ FETCH</button>{{end}}
+  </div>
+</div>
+{{end}}
+{{end}}
+
+{{/* htmx fragment: next page of rows, swapped in at the load-more sentinel. */}}
+{{define "book_episodes_partial"}}
+{{template "book_episode_rows" .}}
+{{if .HasMore}}
+<div id="ep-more"
+     hx-get="/books/{{.BookID}}/episodes?offset={{.NextOffset}}{{if .Q}}&q={{.Q}}{{end}}"
+     hx-trigger="revealed"
+     hx-swap="outerHTML">
+  <div class="zrow ep-loading"><span class="ep-loading-dot">·</span><span class="ep-loading-dot">·</span><span class="ep-loading-dot">·</span> LOADING…</div>
+</div>
+{{end}}
 {{end}}

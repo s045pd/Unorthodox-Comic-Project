@@ -7,34 +7,68 @@
   <main class="shell">
     <header class="page-head">
       <div>
-        <p class="crumb">SECTION <b>// 01</b> · BOOKS</p>
+        <p class="crumb">SECTION <b>// 01</b> · BOOKS{{if .TagFilter}} · TAG <b>{{.TagFilter}}</b>{{end}}{{if .Q}} · SEARCH <b>{{.Q}}</b>{{end}}{{if .StatusFilter}} · STATUS <b>{{.StatusFilter}}</b>{{end}} · SORT <b>{{.Sort}}</b></p>
         <h1>{{.Title}}<br/>INDEX</h1>
       </div>
       <div class="meta">
-        <span>TOTAL HOLDINGS</span>
+        <span>{{if or .TagFilter .Q}}MATCHED{{else}}TOTAL HOLDINGS{{end}}</span>
         <b>{{.Total}}</b>
         <span>PAGE {{.Page}}</span>
       </div>
     </header>
 
+    <form class="filter-bar" method="get" action="/books" role="search">
+      <input type="search" name="q" value="{{.Q}}" placeholder="SEARCH TITLE OR ID…" autocomplete="off"/>
+      {{if .TagFilter}}<input type="hidden" name="tag" value="{{.TagFilter}}"/>{{end}}
+
+      <label class="sort-label">STATUS</label>
+      <select name="status" class="sort-select" onchange="this.form.submit()">
+        <option value=""           {{if eq .StatusFilter ""}}selected{{end}}>ALL</option>
+        <option value="complete"   {{if eq .StatusFilter "complete"}}selected{{end}}>✓ COMPLETE</option>
+        <option value="partial"    {{if eq .StatusFilter "partial"}}selected{{end}}>⏳ IN PROGRESS</option>
+        <option value="empty"      {{if eq .StatusFilter "empty"}}selected{{end}}>∅ NOT CRAWLED</option>
+      </select>
+
+      <label class="sort-label">SORT</label>
+      <select name="sort" class="sort-select" onchange="this.form.submit()">
+        <option value="hot"        {{if eq .Sort "hot"}}selected{{end}}>★ HOT (high → low)</option>
+        <option value="hot_asc"    {{if eq .Sort "hot_asc"}}selected{{end}}>★ HOT (low → high)</option>
+        <option value="recent"     {{if eq .Sort "recent"}}selected{{end}}>↻ RECENTLY UPDATED</option>
+        <option value="episodes"   {{if eq .Sort "episodes"}}selected{{end}}>EPISODES (most)</option>
+        <option value="title"      {{if eq .Sort "title"}}selected{{end}}>TITLE A→Z</option>
+        <option value="title_desc" {{if eq .Sort "title_desc"}}selected{{end}}>TITLE Z→A</option>
+      </select>
+
+      <button type="submit" class="btn tiny">▸ FILTER</button>
+      {{if or .TagFilter .Q .StatusFilter}}<a class="btn tiny ghost" href="/books{{if ne .Sort "hot"}}?sort={{.Sort}}{{end}}">✕ CLEAR</a>{{end}}
+      {{if .TagFilter}}<span class="filter-chip">▮ TAG · <b>{{.TagFilter}}</b> <a href="?{{if .Q}}q={{.Q}}&{{end}}{{if .StatusFilter}}status={{.StatusFilter}}&{{end}}sort={{.Sort}}" title="remove tag">✕</a></span>{{end}}
+      {{if .StatusFilter}}<span class="filter-chip">▮ STATUS · <b>{{.StatusFilter}}</b> <a href="?{{if .Q}}q={{.Q}}&{{end}}{{if .TagFilter}}tag={{.TagFilter}}&{{end}}sort={{.Sort}}" title="remove status">✕</a></span>{{end}}
+    </form>
+
     {{if .Books}}
     <section class="book-grid">
       {{range .Books}}
-      <article class="book">
-        {{if gt .Hot 5}}<span class="book-tag">★ HOT {{.Hot}}</span>{{end}}
-        <a href="/books/{{.ID}}" class="book-cover{{if not .CoverPath}} empty{{end}}" style="text-decoration:none">
-          {{if .CoverPath}}<img src="/{{.CoverPath}}" alt="" loading="lazy"/>{{end}}
+      <article class="book{{if .HasBookmark}} has-bookmark{{end}}">
+        {{if gt .Hot 100000}}<span class="book-tag">★ HOT {{humanCN .Hot}}</span>{{end}}
+        {{if .HasBookmark}}<span class="book-bookmark" title="Continue: {{.BookmarkEpTitle}} · page {{add .BookmarkImageIdx 1}}/{{.BookmarkTotalPages}}">▶ {{add .BookmarkImageIdx 1}}/{{.BookmarkTotalPages}}</span>{{end}}
+        <a href="/books/{{.ID}}" class="book-cover{{if and (not .CoverPath) (not .ImageURL)}} empty{{end}}" style="text-decoration:none">
+          {{if .CoverPath}}<img src="/{{.CoverPath}}" alt="" loading="lazy"/>
+          {{else if .ImageURL}}<img src="{{.ImageURL}}" alt="" loading="lazy" referrerpolicy="no-referrer"/>{{end}}
         </a>
         <div class="book-meta">
           <h3 class="book-title"><a href="/books/{{.ID}}">{{.Title}}</a></h3>
           <div class="book-line">
             <span>EP <b>{{.EpisodeCount}}</b></span>
-            <span>HOT <b>{{.Hot}}</b></span>
+            <span>HOT <b>{{humanCN .Hot}}</b></span>
           </div>
         </div>
         <div class="book-actions">
-          <a class="btn tiny" href="/books/{{.ID}}">▸ OPEN</a>
-          <button class="btn tiny red" hx-post="/books/{{.ID}}/crawl" hx-swap="outerHTML">↻ CRAWL</button>
+          {{if .HasBookmark}}
+            <a class="btn tiny primary" href="/episodes/{{.BookmarkEpisodeID}}#bookmark" title="Continue from where you left off">▶ CONTINUE</a>
+          {{else}}
+            <a class="btn tiny" href="/books/{{.ID}}">▸ OPEN</a>
+          {{end}}
+          {{if and $.Session $.Session.IsAdmin}}<button class="btn tiny red" hx-post="/books/{{.ID}}/crawl" hx-swap="outerHTML">↻ CRAWL</button>{{end}}
         </div>
       </article>
       {{end}}
@@ -42,15 +76,15 @@
     {{else}}
     <div class="empty">
       <span class="big">∅</span>
-      ARCHIVE EMPTY · TRIGGER ▶ START CRAWL
+      {{if or .TagFilter .Q}}NO MATCHES · TRY CLEARING FILTERS{{else}}ARCHIVE EMPTY · TRIGGER ▶ START CRAWL{{end}}
     </div>
     {{end}}
 
     <nav class="pager">
       <span>PAGE <b>{{.Page}}</b> OF <b>{{if gt .Total 0}}{{div (sub (add .Total .Limit) 1) .Limit}}{{else}}1{{end}}</b></span>
       <span class="marker"></span>
-      {{if gt .Page 1}}<a class="btn tiny" href="?page={{sub .Page 1}}">◂ PREV</a>{{end}}
-      {{if gt .Total (add .Page .Limit)}}<a class="btn tiny" href="?page={{add .Page 1}}">NEXT ▸</a>{{end}}
+      {{if gt .Page 1}}<a class="btn tiny" href="?page={{sub .Page 1}}{{if .TagFilter}}&tag={{.TagFilter}}{{end}}{{if .Q}}&q={{.Q}}{{end}}{{if .StatusFilter}}&status={{.StatusFilter}}{{end}}&sort={{.Sort}}">◂ PREV</a>{{end}}
+      {{if gt .Total (mul .Page .Limit)}}<a class="btn tiny" href="?page={{add .Page 1}}{{if .TagFilter}}&tag={{.TagFilter}}{{end}}{{if .Q}}&q={{.Q}}{{end}}{{if .StatusFilter}}&status={{.StatusFilter}}{{end}}&sort={{.Sort}}">NEXT ▸</a>{{end}}
     </nav>
   </main>
 </body>

@@ -63,9 +63,23 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // renderTemplate writes the named template using the whole data map.
 // Templates that use {{template "content" .}} must be passed a block name.
+// Use this for fragments / pre-login pages that don't need Session in chrome.
 func (s *Server) renderTemplate(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.Templates.ExecuteTemplate(w, name, data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+// renderPage is renderTemplate + automatic Session injection for any data
+// passed as map[string]any. Page handlers (those rendering chrome with nav)
+// should use this so role-aware links render correctly.
+func (s *Server) renderPage(w http.ResponseWriter, r *http.Request, name string, data map[string]any) {
+	if data == nil {
+		data = map[string]any{}
+	}
+	if _, exists := data["Session"]; !exists {
+		data["Session"] = SessionFromContext(r.Context())
+	}
+	s.renderTemplate(w, name, data)
 }

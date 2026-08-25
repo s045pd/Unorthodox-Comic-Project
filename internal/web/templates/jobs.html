@@ -27,6 +27,31 @@
 {{end}}
 
 {{define "jobs_fragment"}}
+{{with .Stats}}
+<section class="stats-grid">
+  <div class="stat-card stat-running">
+    <span class="stat-num">{{.Running}}</span>
+    <span class="stat-lab">RUNNING</span>
+  </div>
+  <div class="stat-card stat-pending">
+    <span class="stat-num">{{.Pending}}</span>
+    <span class="stat-lab">PENDING</span>
+  </div>
+  <div class="stat-card stat-done">
+    <span class="stat-num">{{.Done}}</span>
+    <span class="stat-lab">DONE · +{{.DonePerMin}}/min</span>
+  </div>
+  <div class="stat-card stat-failed">
+    <span class="stat-num">{{.Failed}}</span>
+    <span class="stat-lab">FAILED · +{{.FailedPerMin}}/min</span>
+  </div>
+  <div class="stat-card stat-images">
+    <span class="stat-num">{{.ImagesSaved}}<small>/{{.ImagesTotal}}</small></span>
+    <span class="stat-lab">▾ IMAGES SAVED</span>
+  </div>
+</section>
+{{end}}
+
 {{if .Jobs}}
 <div class="zlist">
   {{range .Jobs}}

@@ -1,6 +1,10 @@
 {{define "head_assets"}}
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d0d0d" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="format-detection" content="telephone=no" />
   <title>{{.Title}} ▮ SE8 ARCHIVE</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -16,8 +20,8 @@
     <span class="mast-edition">// BACKEND ARCHIVE · ED.001</span>
     <span class="mast-stamp">CONFIDENTIAL</span>
     <span class="mast-spacer"></span>
-    <span class="mast-stamp">{{.Title}}</span>
-    <form action="/admin/start-crawl" method="post"><button type="submit" class="btn primary">▶ START CRAWL</button></form>
+    {{with .Session}}<span class="mast-stamp" title="{{if .IsAdmin}}admin{{else}}user{{end}}">▮ {{.Username}}{{if .IsAdmin}} ★{{end}}</span>{{end}}
+    {{if and .Session .Session.IsAdmin}}<form action="/admin/start-crawl" method="post"><button type="submit" class="btn primary">▶ START CRAWL</button></form>{{end}}
     <form action="/logout" method="post"><button type="submit" class="btn">LOGOUT ↻</button></form>
   </div>
 </header>
@@ -26,8 +30,12 @@
     <a href="/books">Books</a>
     <a href="/episodes">Episodes</a>
     <a href="/tags">Tags</a>
-    <a href="/jobs">Jobs</a>
-    <a href="/images">Images</a>
+    <a href="/me/bookmarks">My Reading</a>
+    {{if and .Session .Session.IsAdmin}}
+      <a href="/jobs">Jobs</a>
+      <a href="/images">Images</a>
+      <a href="/admin/users">Users</a>
+    {{end}}
     <span class="nav-tail">— sec/{{.Title}}</span>
   </div>
 </nav>

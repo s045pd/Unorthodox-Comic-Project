@@ -27,7 +27,11 @@ func safeReferer(r *http.Request, fallback string) string {
 }
 
 func (s *Server) mountAdminRoutes(r chi.Router) {
-	r.Post("/admin/start-crawl", s.handleStartCrawl)
+	// Manual full-site crawl trigger — admin only.
+	r.Group(func(r chi.Router) {
+		r.Use(requireAdmin)
+		r.Post("/admin/start-crawl", s.handleStartCrawl)
+	})
 }
 
 func (s *Server) handleStartCrawl(w http.ResponseWriter, r *http.Request) {

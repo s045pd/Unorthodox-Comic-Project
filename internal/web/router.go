@@ -62,6 +62,8 @@ func (s *Server) Router() http.Handler {
 		s.mountJobRoutes(r)
 		s.mountMediaRoutes(r)
 		s.mountAdminRoutes(r)
+		s.mountUserRoutes(r)
+		s.mountBookmarkRoutes(r)
 	})
 	return r
 }

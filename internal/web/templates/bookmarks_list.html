@@ -1,0 +1,50 @@
+{{define "bookmarks_list"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>{{template "head_assets" .}}</head>
+<body>
+  {{template "masthead" .}}
+  <main class="shell">
+    <header class="page-head">
+      <div>
+        <p class="crumb">SECTION <b>// 07</b> · MY READING · CONTINUE WHERE YOU LEFT OFF</p>
+        <h1>{{.Title}}<br/>QUEUE</h1>
+      </div>
+      <div class="meta">
+        <span>BOOKMARKS</span>
+        <b>{{len .Bookmarks}}</b>
+      </div>
+    </header>
+
+    {{if .Bookmarks}}
+    <div class="zlist">
+      {{range .Bookmarks}}
+      <div class="zrow ep">
+        <span class="id">{{.UpdatedAt.Format "01-02 15:04"}}</span>
+        <h4 class="title">
+          <a href="/episodes/{{.EpisodeID}}#bookmark" style="color:inherit;text-decoration:none">{{.BookTitle}}</a>
+          <a href="/books/{{.BookID}}" style="color:var(--blood);text-decoration:none;font-family:var(--t-mono);font-size:10px;letter-spacing:0.16em">→ {{.BookID}}</a>
+        </h4>
+        <div class="progress-bar" title="Page {{add .ImageIdx 1}} / {{.TotalPages}}">
+          <span style="width:{{if gt .TotalPages 0}}{{div (mul (add .ImageIdx 1) 100) .TotalPages}}{{else}}0{{end}}%"></span>
+        </div>
+        <span class="count" style="font-family:var(--t-mono);font-size:11px;color:var(--mute)">CH·{{.EpisodeID}} · P{{add .ImageIdx 1}}/{{.TotalPages}}</span>
+        <div class="actions">
+          <a class="btn tiny primary" href="/episodes/{{.EpisodeID}}#bookmark">▸ CONTINUE</a>
+          <form action="/api/bookmark/{{.BookID}}/delete" method="post" style="display:inline;margin:0">
+            <button class="btn tiny ghost">✕</button>
+          </form>
+        </div>
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="empty">
+      <span class="big">∅</span>
+      NO BOOKMARKS YET · OPEN ANY CHAPTER, SCROLL — POSITION SAVES AUTOMATICALLY
+    </div>
+    {{end}}
+  </main>
+</body>
+</html>
+{{end}}

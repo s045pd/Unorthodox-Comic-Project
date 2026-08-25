@@ -1,0 +1,111 @@
+{{define "users_list"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>{{template "head_assets" .}}</head>
+<body>
+  {{template "masthead" .}}
+  <main class="shell">
+    <header class="page-head">
+      <div>
+        <p class="crumb">SECTION <b>// 06</b> · ADMIN · USERS</p>
+        <h1>{{.Title}}<br/>ROSTER</h1>
+      </div>
+      <div class="meta">
+        <span>OPERATORS</span>
+        <b>{{len .Users}}</b>
+      </div>
+    </header>
+
+    {{with .Flash}}
+      {{if .NewUsername}}
+      <div class="success-bar">
+        ✓ NEW USER <b>{{.NewUsername}}</b> CREATED · ONE-TIME PASSWORD:
+        <code class="pw">{{.NewPassword}}</code>
+        <small>(copy now — won't be shown again)</small>
+      </div>
+      {{end}}
+      {{if .ResetUser}}
+      <div class="success-bar">
+        ↻ PASSWORD RESET FOR <b>{{.ResetUser}}</b> · NEW:
+        <code class="pw">{{.ResetPW}}</code>
+      </div>
+      {{end}}
+      {{if .Notice}}<div class="notice-bar">▮ {{.Notice}}</div>{{end}}
+      {{if .Error}}<div class="error-bar">⚠ {{.Error}}</div>{{end}}
+    {{end}}
+
+    <span class="section-label">▮ ADD OPERATOR</span>
+    <form class="filter-bar" method="post" action="/admin/users">
+      <input type="text" name="username" placeholder="USERNAME (a-z, no spaces)" required pattern="[a-zA-Z0-9_\-]+"/>
+      <input type="text" name="password" placeholder="PASSWORD (≥4 chars, leave blank to auto-generate)" minlength="4" autocomplete="new-password"/>
+      <select name="role" class="sort-select">
+        <option value="user" selected>ROLE: USER</option>
+        <option value="admin">ROLE: ADMIN</option>
+      </select>
+      <button class="btn tiny primary" type="submit">+ CREATE</button>
+    </form>
+    <p class="form-hint">Leave password blank to auto-generate a 64-char random one. Custom passwords must be at least 4 characters.</p>
+
+    <span class="section-label">▮ ROSTER</span>
+    <div class="zlist">
+      <div class="zrow user header">
+        <span class="id">ID</span>
+        <span><b>USERNAME</b></span>
+        <span>ROLE</span>
+        <span>STATUS</span>
+        <span>CREATED</span>
+        <span class="actions">ACTIONS</span>
+      </div>
+      {{range .Users}}
+      <div class="zrow user">
+        <span class="id">№{{.ID}}</span>
+        <span><b style="font-family:var(--t-display);font-size:18px;letter-spacing:-0.005em;text-transform:uppercase">{{.Username}}</b>{{if eq .ID $.Session.UserID}} <code style="color:var(--blood)">(YOU)</code>{{end}}</span>
+        <span>
+          {{if eq .Role "admin"}}<span class="pill done">★ ADMIN</span>
+          {{else}}<span class="pill pending">USER</span>{{end}}
+        </span>
+        <span>
+          {{if .Active}}<span class="pill done">ACTIVE</span>
+          {{else}}<span class="pill failed">INACTIVE</span>{{end}}
+        </span>
+        <span style="font-family:var(--t-mono);font-size:10px;color:var(--mute)">{{.CreatedAt.Format "2006-01-02"}}</span>
+        <div class="actions">
+          <form action="/admin/users/{{.ID}}/reset" method="post" class="inline-pw-form" title="Set password (leave blank for random)">
+            <input type="text" name="password" placeholder="New PW (blank=random)" minlength="4" autocomplete="new-password"/>
+            <button class="btn tiny ghost">↻ SET PW</button>
+          </form>
+          {{if .Active}}
+          <form action="/admin/users/{{.ID}}/active" method="post" style="display:inline;margin:0">
+            <input type="hidden" name="to" value="0"/>
+            <button class="btn tiny" title="Block login + invalidate sessions">⏸ DISABLE</button>
+          </form>
+          {{else}}
+          <form action="/admin/users/{{.ID}}/active" method="post" style="display:inline;margin:0">
+            <input type="hidden" name="to" value="1"/>
+            <button class="btn tiny" title="Re-enable login">▶ ENABLE</button>
+          </form>
+          {{end}}
+          {{if eq .Role "admin"}}
+          <form action="/admin/users/{{.ID}}/role" method="post" style="display:inline;margin:0">
+            <input type="hidden" name="role" value="user"/>
+            <button class="btn tiny" title="Make this user a regular user (no admin powers)">↓ MAKE USER</button>
+          </form>
+          {{else}}
+          <form action="/admin/users/{{.ID}}/role" method="post" style="display:inline;margin:0">
+            <input type="hidden" name="role" value="admin"/>
+            <button class="btn tiny" title="Grant admin powers">↑ MAKE ADMIN</button>
+          </form>
+          {{end}}
+          {{if ne .ID $.Session.UserID}}
+          <form action="/admin/users/{{.ID}}/delete" method="post" style="display:inline;margin:0" onsubmit="return confirm('Delete user {{.Username}}? This wipes their bookmarks.');">
+            <button class="btn tiny red">✕ DELETE</button>
+          </form>
+          {{end}}
+        </div>
+      </div>
+      {{end}}
+    </div>
+  </main>
+</body>
+</html>
+{{end}}

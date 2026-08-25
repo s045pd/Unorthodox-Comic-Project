@@ -30,7 +30,8 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	}{
 		{"0 0 * * *", jobs.KindFindBooks, "find_books:daily"},
 		{"0 1 * * *", jobs.KindFixImages, "fix_images:daily"},
-		{"0 2 * * *", jobs.KindFixPDF, "fix_pdf:daily"},
+		// fix_pdf cron disabled — built-in web reader is the primary surface;
+		// convert_pdf handler stays available for manual API trigger only.
 	}
 	for _, sp := range specs {
 		kind, key := sp.kind, sp.key

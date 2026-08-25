@@ -2,7 +2,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>{{template "head_assets" .}}</head>
-<body>
+<body data-prev-id="{{.PrevID}}" data-next-id="{{.NextID}}" data-book-id="{{.BookID}}" data-episode-id="{{.ID}}">
   {{template "masthead" .}}
   <main class="shell">
     <header class="page-head">
@@ -16,26 +16,372 @@
       </div>
     </header>
 
-    <div class="reader-bar">
-      <span>▶ READING · CH{{.ID}}</span>
-      <span><a href="/books/{{.BookID}}">▮ EXIT TO BOOK</a></span>
-    </div>
+    {{template "chapter_nav" .}}
 
     {{if .Paths}}
-    <section class="reader">
-      {{range .Paths}}
-        {{if .}}<img src="/{{.}}" loading="lazy" alt=""/>{{end}}
+    <section class="reader" id="reader">
+      {{range $i, $p := .Paths}}
+        {{if $p}}<img src="/{{$p}}" loading="lazy" alt="" data-idx="{{$i}}"/>{{end}}
       {{end}}
     </section>
     {{else}}
     <div class="empty"><span class="big">∅</span>NO IMAGES YET · TRIGGER ↻ FETCH FROM BOOK PAGE</div>
     {{end}}
 
-    <div class="reader-bar">
-      <span>▮ END OF CHAPTER</span>
-      <span><a href="/books/{{.BookID}}">▸ BACK TO BOOK</a></span>
-    </div>
+    {{template "chapter_nav" .}}
   </main>
+
+  {{if .Paths}}
+  <!-- floating reader toolbar -->
+  <aside id="rtb" class="rtb">
+    <div class="rtb-row top">
+      <button class="rtb-btn mode" id="rtb-mode" title="Toggle scroll / pager">▼ SCROLL</button>
+      <button class="rtb-btn play" id="rtb-play" title="Play / pause">▶</button>
+      <span class="rtb-info" id="rtb-info">— / {{len .Paths}}</span>
+    </div>
+    <div class="rtb-row bottom">
+      <button class="rtb-step" id="rtb-slower" title="Slower">−</button>
+      <span class="rtb-speed" id="rtb-speed">×1</span>
+      <button class="rtb-step" id="rtb-faster" title="Faster">+</button>
+    </div>
+    <div class="rtb-hint">space=play · m=mode · ← → page</div>
+  </aside>
+
+  <!-- end-of-chapter overlay (for auto-advance) -->
+  <div id="end-overlay" class="end-overlay" hidden>
+    <div class="end-card">
+      <p class="end-tag">▮ END OF CHAPTER</p>
+      <p class="end-msg">Auto-jumping to next in <b id="end-count">5</b>s…</p>
+      <div class="end-btns">
+        <button id="end-cancel" class="btn">CANCEL</button>
+        <button id="end-go" class="btn primary">▸ NEXT CH NOW</button>
+      </div>
+    </div>
+  </div>
+  {{end}}
+
+  <script>
+  (function(){
+    const reader = document.getElementById('reader');
+    if (!reader) return;
+    const imgs = Array.from(reader.querySelectorAll('img'));
+    if (imgs.length === 0) return;
+
+    const prevID = document.body.dataset.prevId;
+    const nextID = document.body.dataset.nextId;
+    const total = imgs.length;
+
+    const tb = document.getElementById('rtb');
+    const btnMode = document.getElementById('rtb-mode');
+    const btnPlay = document.getElementById('rtb-play');
+    const btnSlow = document.getElementById('rtb-slower');
+    const btnFast = document.getElementById('rtb-faster');
+    const elInfo  = document.getElementById('rtb-info');
+    const elSpd   = document.getElementById('rtb-speed');
+
+    const overlay = document.getElementById('end-overlay');
+    const endCount = document.getElementById('end-count');
+    const btnCancel = document.getElementById('end-cancel');
+    const btnGo = document.getElementById('end-go');
+
+    // ---- state ----
+    const LS = {
+      mode:   'se8.reader.mode',   // 'scroll' or 'pager'
+      speed:  'se8.reader.speed',  // 1..10
+    };
+    let mode  = localStorage.getItem(LS.mode) || 'scroll';
+    let speed = parseInt(localStorage.getItem(LS.speed) || '4', 10);
+    let playing = false;
+    let cur = 0;          // pager: current image index
+    let raf = null;       // scroll raf handle
+    let pagerTimer = null;
+
+    // ---- mode switching ----
+    function applyMode() {
+      if (mode === 'pager') {
+        document.body.classList.add('mode-pager');
+        document.body.classList.remove('mode-scroll');
+        showOnly(cur);
+        btnMode.textContent = '◀▶ PAGER';
+      } else {
+        document.body.classList.add('mode-scroll');
+        document.body.classList.remove('mode-pager');
+        imgs.forEach(im => im.style.display = '');
+        btnMode.textContent = '▼ SCROLL';
+      }
+      updateInfo();
+    }
+
+    function showOnly(idx) {
+      cur = Math.max(0, Math.min(total - 1, idx));
+      imgs.forEach((im, i) => im.style.display = (i === cur ? '' : 'none'));
+      // scroll img into view (no smooth — instant snap)
+      if (imgs[cur]) imgs[cur].scrollIntoView({ block: 'start' });
+      updateInfo();
+    }
+
+    function updateInfo() {
+      if (mode === 'pager') {
+        elInfo.textContent = (cur + 1) + ' / ' + total;
+      } else {
+        // approximate page from scroll position relative to imgs
+        const top = window.scrollY + window.innerHeight * 0.3;
+        let n = 0;
+        for (let i = 0; i < imgs.length; i++) {
+          const r = imgs[i].getBoundingClientRect();
+          if (r.top + window.scrollY <= top) n = i + 1;
+          else break;
+        }
+        elInfo.textContent = (n || 1) + ' / ' + total;
+      }
+      elSpd.textContent = '×' + speed;
+    }
+
+    // ---- play/pause ----
+    function play() {
+      if (playing) return;
+      playing = true;
+      btnPlay.textContent = '⏸';
+      tb.classList.add('playing');
+      if (mode === 'scroll') {
+        const tick = () => {
+          if (!playing) return;
+          window.scrollBy(0, speed);             // px per frame ~= speed*60 px/sec
+          updateInfo();
+          if (window.scrollY + window.innerHeight >= document.body.scrollHeight - 4) {
+            pause();
+            triggerEnd();
+            return;
+          }
+          raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+      } else {
+        // pager: speed=1 → 8s/page, speed=10 → 0.8s/page
+        const interval = Math.max(800, 9000 - speed * 800);
+        pagerTimer = setInterval(() => {
+          if (cur >= total - 1) {
+            pause();
+            triggerEnd();
+            return;
+          }
+          showOnly(cur + 1);
+        }, interval);
+      }
+    }
+    function pause() {
+      playing = false;
+      btnPlay.textContent = '▶';
+      tb.classList.remove('playing');
+      if (raf) { cancelAnimationFrame(raf); raf = null; }
+      if (pagerTimer) { clearInterval(pagerTimer); pagerTimer = null; }
+    }
+    function togglePlay() { playing ? pause() : play(); }
+
+    // ---- end-of-chapter auto-advance ----
+    let endTimer = null;
+    function triggerEnd() {
+      if (!nextID) return;
+      overlay.hidden = false;
+      let n = 5;
+      endCount.textContent = n;
+      endTimer = setInterval(() => {
+        n--;
+        endCount.textContent = n;
+        if (n <= 0) { clearInterval(endTimer); location.href = '/episodes/' + nextID; }
+      }, 1000);
+    }
+    btnCancel.addEventListener('click', () => {
+      overlay.hidden = true;
+      if (endTimer) clearInterval(endTimer);
+    });
+    btnGo.addEventListener('click', () => {
+      if (nextID) location.href = '/episodes/' + nextID;
+    });
+
+    // ---- buttons ----
+    btnMode.addEventListener('click', () => {
+      mode = (mode === 'scroll') ? 'pager' : 'scroll';
+      localStorage.setItem(LS.mode, mode);
+      pause();
+      applyMode();
+    });
+    btnPlay.addEventListener('click', togglePlay);
+    btnSlow.addEventListener('click', () => { speed = Math.max(1, speed - 1); localStorage.setItem(LS.speed, speed); updateInfo(); if (playing) { pause(); play(); } });
+    btnFast.addEventListener('click', () => { speed = Math.min(10, speed + 1); localStorage.setItem(LS.speed, speed); updateInfo(); if (playing) { pause(); play(); } });
+
+    // pager: tap zones (left half = prev, right half = next)
+    reader.addEventListener('click', (e) => {
+      if (mode !== 'pager') return;
+      const x = e.clientX;
+      if (x < window.innerWidth * 0.4) showOnly(cur - 1);
+      else if (x > window.innerWidth * 0.6) showOnly(cur + 1);
+    });
+
+    // ---- keyboard ----
+    document.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+      else if (e.key.toLowerCase() === 'm') { btnMode.click(); }
+      else if (e.key === 'ArrowLeft') {
+        if (mode === 'pager' && cur > 0) showOnly(cur - 1);
+        else if (prevID) location.href = '/episodes/' + prevID;
+      } else if (e.key === 'ArrowRight') {
+        if (mode === 'pager' && cur < total - 1) showOnly(cur + 1);
+        else if (nextID) location.href = '/episodes/' + nextID;
+      }
+    });
+
+    // ---- pause on user manual scroll (scroll mode only) ----
+    let manualTimer = null;
+    let lastY = window.scrollY;
+    let autoScrolling = false;
+    window.addEventListener('scroll', () => {
+      if (mode !== 'scroll') return;
+      const dy = window.scrollY - lastY;
+      lastY = window.scrollY;
+      // if delta is much larger than expected auto-step, treat as manual
+      if (Math.abs(dy) > speed * 4 && playing) {
+        pause();
+      }
+      updateInfo();
+    }, { passive: true });
+
+    // ---- bookmark: save+restore exact reading position ----
+    const bookID = document.body.dataset.bookId;
+    const episodeID = parseInt(document.body.dataset.episodeId || '0', 10);
+    let saveTimer = null;
+
+    // Compute current (image_idx, scroll_pct) based on viewport center.
+    function currentPosition() {
+      const vh = window.innerHeight;
+      const centerY = window.scrollY + vh * 0.4;
+      let idx = 0, pct = 0;
+      for (let i = 0; i < imgs.length; i++) {
+        const r = imgs[i].getBoundingClientRect();
+        const top = r.top + window.scrollY;
+        if (top <= centerY) {
+          idx = i;
+          const h = r.height || 1;
+          pct = Math.max(0, Math.min(1, (centerY - top) / h));
+        } else break;
+      }
+      return { image_idx: idx, scroll_pct: pct };
+    }
+
+    function saveBookmark() {
+      if (!bookID || !episodeID) return;
+      const pos = (mode === 'pager') ? { image_idx: cur, scroll_pct: 0 } : currentPosition();
+      fetch('/api/bookmark', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          book_id: bookID,
+          episode_id: episodeID,
+          image_idx: pos.image_idx,
+          scroll_pct: pos.scroll_pct,
+          total_pages: total,
+        }),
+      }).catch(() => {});
+    }
+    function debouncedSave() {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(saveBookmark, 1500);
+    }
+
+    // restore on load: if URL hash is #bookmark or query asks for restore,
+    // pull current bookmark and scroll to it (only if matches this episode).
+    async function restoreIfNeeded() {
+      if (!bookID || !episodeID) return;
+      const wantRestore = location.hash === '#bookmark' || location.search.includes('restore=1');
+      // Always also check for a bookmark on the same episode silently — gives
+      // continuity even if the user just refreshed mid-read.
+      try {
+        const resp = await fetch('/api/bookmark/' + encodeURIComponent(bookID));
+        if (!resp.ok) return;
+        const bm = await resp.json();
+        if (!bm) return;
+        if (bm.episode_id !== episodeID) {
+          // bookmark is on a different chapter — only show CTA if user asked.
+          if (wantRestore) {
+            const goTo = '/episodes/' + bm.episode_id + '#bookmark';
+            if (confirm('You were last reading another chapter (page ' +
+                        (bm.image_idx + 1) + '/' + bm.total_pages + ').\nJump there?')) {
+              location.href = goTo;
+            }
+          }
+          return;
+        }
+        // Same chapter — restore precise position.
+        const targetIdx = Math.max(0, Math.min(imgs.length - 1, bm.image_idx));
+        // Wait for the target image's natural height (lazy-loaded);
+        // images further down the page won't have height yet, so we
+        // use a small retry loop with rAF.
+        const tryScroll = (attempt) => {
+          const im = imgs[targetIdx];
+          if (!im) return;
+          const r = im.getBoundingClientRect();
+          const h = r.height;
+          if (h < 50 && attempt < 40) {
+            // image not yet sized — give the lazy loader a moment
+            requestAnimationFrame(() => tryScroll(attempt + 1));
+            return;
+          }
+          if (mode === 'pager') {
+            cur = targetIdx;
+            showOnly(cur);
+            return;
+          }
+          const top = r.top + window.scrollY;
+          window.scrollTo({ top: top + h * bm.scroll_pct - window.innerHeight * 0.4, behavior: 'instant' });
+        };
+        // Defer slightly so layout settles.
+        setTimeout(() => tryScroll(0), 100);
+      } catch (e) { /* ignore */ }
+    }
+
+    // hook saves to scroll + visibility change + before unload
+    window.addEventListener('scroll', debouncedSave, { passive: true });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') saveBookmark();
+    });
+    window.addEventListener('beforeunload', saveBookmark);
+    // also save when user toggles mode or jumps page in pager
+    btnMode.addEventListener('click', debouncedSave);
+
+    // init
+    applyMode();
+    updateInfo();
+    restoreIfNeeded();
+  })();
+  </script>
 </body>
 </html>
+{{end}}
+
+{{define "chapter_nav"}}
+<nav class="chapter-nav">
+  {{if .PrevID}}
+    <a class="chapter-nav-btn prev" href="/episodes/{{.PrevID}}" title="← {{.PrevTitle}}">
+      <span class="dir">◂ PREV CH</span>
+      <span class="t">{{.PrevTitle}}</span>
+    </a>
+  {{else}}
+    <span class="chapter-nav-btn prev disabled"><span class="dir">◂ PREV CH</span><span class="t">— FIRST —</span></span>
+  {{end}}
+
+  <a class="chapter-nav-btn home" href="/books/{{.BookID}}" title="Back to book">
+    <span class="dir">▮</span>
+    <span class="t">BOOK INDEX</span>
+  </a>
+
+  {{if .NextID}}
+    <a class="chapter-nav-btn next" href="/episodes/{{.NextID}}" title="{{.NextTitle}} →">
+      <span class="dir">NEXT CH ▸</span>
+      <span class="t">{{.NextTitle}}</span>
+    </a>
+  {{else}}
+    <span class="chapter-nav-btn next disabled"><span class="dir">NEXT CH ▸</span><span class="t">— LAST —</span></span>
+  {{end}}
+</nav>
 {{end}}

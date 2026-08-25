@@ -27,14 +27,15 @@ func TestOpen_RunsMigrations(t *testing.T) {
 		t.Errorf("got table %q, want books", name)
 	}
 
-	// Verify migration recorded
+	// Verify migrations are recorded (at least version 1, plus any later perf
+	// indexes that have been added since).
 	var version int
 	err = db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version)
 	if err != nil {
 		t.Fatalf("schema_migrations: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("migration version = %d, want 1", version)
+	if version < 1 {
+		t.Errorf("migration version = %d, want >= 1", version)
 	}
 }
 

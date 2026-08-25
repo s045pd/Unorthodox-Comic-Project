@@ -1,6 +1,7 @@
 package web
 
 import (
+	"strings"
 	"net/http"
 	"strconv"
 
@@ -17,32 +18,93 @@ type episodeRow struct {
 }
 
 func (s *Server) mountEpisodeRoutes(r chi.Router) {
+	// Read-only — any user.
 	r.Get("/episodes", s.handleEpisodesList)
 	r.Get("/episodes/{id}", s.handleEpisodeRead)
-	r.Post("/episodes/{id}/fetch", s.handleEpisodeFetch)
-	r.Post("/episodes/{id}/pdf", s.handleEpisodePDF)
+	// Mutating — admin only.
+	r.Group(func(r chi.Router) {
+		r.Use(requireAdmin)
+		r.Post("/episodes/{id}/fetch", s.handleEpisodeFetch)
+		r.Post("/episodes/{id}/pdf", s.handleEpisodePDF)
+	})
 }
 
-func (s *Server) loadEpisodeRowsForBook(r *http.Request, bookID string) ([]episodeRow, error) {
+// loadEpisodePageForBook returns a single page of episodes for a book, plus
+// the total number of episodes that match (used by paginators / lazy load).
+//
+// Pagination keeps book_detail fast even when a series has hundreds of
+// chapters — the original code loaded every chapter on every page hit. The
+// per-row image-count subqueries are replaced by a single GROUP BY scoped to
+// the visible episode IDs, so the work is O(visible) instead of O(book).
+//
+// q is an optional substring filter against episode title.
+func (s *Server) loadEpisodePageForBook(r *http.Request, bookID, q string, limit, offset int) (eps []episodeRow, total int, err error) {
+	args := []any{bookID}
+	whereExtra := ""
+	if q != "" {
+		whereExtra = " AND e.title LIKE ?"
+		args = append(args, "%"+q+"%")
+	}
+
+	if err := s.DB.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM episodes e WHERE e.book_id=?`+whereExtra,
+		args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return nil, 0, nil
+	}
+
+	pageArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := s.DB.QueryContext(r.Context(), `
-		SELECT e.id, e.title, e.pdf_path,
-		       (SELECT COUNT(*) FROM images i WHERE i.episode_id=e.id),
-		       (SELECT COUNT(*) FROM images i WHERE i.episode_id=e.id AND i.file_path != ''),
-		       e.book_id
-		FROM episodes e WHERE e.book_id=? ORDER BY e.id`, bookID)
+		SELECT e.id, e.title, e.pdf_path, e.book_id
+		FROM episodes e WHERE e.book_id=?`+whereExtra+`
+		ORDER BY e.id LIMIT ? OFFSET ?`, pageArgs...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []episodeRow
+	var epIDs []any
 	for rows.Next() {
 		var e episodeRow
-		if err := rows.Scan(&e.ID, &e.Title, &e.PDFPath, &e.Total, &e.Completed, &e.BookID); err != nil {
-			return nil, err
+		if err := rows.Scan(&e.ID, &e.Title, &e.PDFPath, &e.BookID); err != nil {
+			return nil, 0, err
 		}
-		out = append(out, e)
+		eps = append(eps, e)
+		epIDs = append(epIDs, e.ID)
 	}
-	return out, nil
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	// One GROUP BY for the visible page only — covered by idx_images_episode.
+	if len(epIDs) > 0 {
+		placeholders := strings.Repeat(",?", len(epIDs))[1:]
+		cRows, cErr := s.DB.QueryContext(r.Context(), `
+			SELECT episode_id,
+			       COUNT(*) AS total,
+			       SUM(CASE WHEN file_path != '' THEN 1 ELSE 0 END) AS completed
+			FROM images WHERE episode_id IN (`+placeholders+`)
+			GROUP BY episode_id`, epIDs...)
+		if cErr == nil {
+			counts := make(map[int64][2]int, len(eps))
+			for cRows.Next() {
+				var epID int64
+				var tot, comp int
+				if err := cRows.Scan(&epID, &tot, &comp); err == nil {
+					counts[epID] = [2]int{tot, comp}
+				}
+			}
+			cRows.Close()
+			for i := range eps {
+				if c, ok := counts[eps[i].ID]; ok {
+					eps[i].Total = c[0]
+					eps[i].Completed = c[1]
+				}
+			}
+		}
+	}
+	return eps, total, nil
 }
 
 func (s *Server) handleEpisodesList(w http.ResponseWriter, r *http.Request) {
@@ -54,40 +116,79 @@ func (s *Server) handleEpisodesList(w http.ResponseWriter, r *http.Request) {
 	offset := (page - 1) * limit
 	bookFilter := r.URL.Query().Get("book")
 
-	q := `
-		SELECT e.id, e.title, e.pdf_path,
-		       (SELECT COUNT(*) FROM images i WHERE i.episode_id=e.id),
-		       (SELECT COUNT(*) FROM images i WHERE i.episode_id=e.id AND i.file_path != ''),
-		       e.book_id
+	// Step 1: fetch the page of episodes WITHOUT the per-row image-count
+	// correlated subqueries (those scanned the 800K-row images table 100×
+	// per page hit and were the main /episodes slowness).
+	listSQL := `
+		SELECT e.id, e.title, e.pdf_path, e.book_id
 		FROM episodes e`
+	countSQL := "SELECT COUNT(*) FROM episodes e"
 	args := []any{}
 	if bookFilter != "" {
-		q += " WHERE e.book_id=?"
+		listSQL += " WHERE e.book_id=?"
+		countSQL += " WHERE e.book_id=?"
 		args = append(args, bookFilter)
 	}
-	q += " ORDER BY e.id DESC LIMIT ? OFFSET ?"
-	args = append(args, limit, offset)
+	listSQL += " ORDER BY e.id DESC LIMIT ? OFFSET ?"
+	listArgs := append(append([]any{}, args...), limit, offset)
 
-	rows, err := s.DB.QueryContext(r.Context(), q, args...)
+	rows, err := s.DB.QueryContext(r.Context(), listSQL, listArgs...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 	var eps []episodeRow
+	var epIDs []any
 	for rows.Next() {
 		var e episodeRow
-		if err := rows.Scan(&e.ID, &e.Title, &e.PDFPath, &e.Total, &e.Completed, &e.BookID); err != nil {
+		if err := rows.Scan(&e.ID, &e.Title, &e.PDFPath, &e.BookID); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		eps = append(eps, e)
+		epIDs = append(epIDs, e.ID)
 	}
 
-	s.renderTemplate(w, "episodes_list", map[string]any{
-		"Title":    "Episodes",
-		"Episodes": eps,
-		"Page":     page,
+	// Step 2: a single grouped query gets total + completed counts for all
+	// episodes on the page in one index seek. Uses idx_images_episode.
+	if len(epIDs) > 0 {
+		placeholders := strings.Repeat(",?", len(epIDs))[1:]
+		countQ := `SELECT episode_id,
+		                  COUNT(*) AS total,
+		                  SUM(CASE WHEN file_path != '' THEN 1 ELSE 0 END) AS completed
+		           FROM images WHERE episode_id IN (` + placeholders + `)
+		           GROUP BY episode_id`
+		cRows, err := s.DB.QueryContext(r.Context(), countQ, epIDs...)
+		if err == nil {
+			counts := make(map[int64][2]int)
+			for cRows.Next() {
+				var epID int64
+				var tot, comp int
+				if err := cRows.Scan(&epID, &tot, &comp); err == nil {
+					counts[epID] = [2]int{tot, comp}
+				}
+			}
+			cRows.Close()
+			for i := range eps {
+				if c, ok := counts[eps[i].ID]; ok {
+					eps[i].Total = c[0]
+					eps[i].Completed = c[1]
+				}
+			}
+		}
+	}
+
+	var total int
+	_ = s.DB.QueryRowContext(r.Context(), countSQL, args...).Scan(&total)
+
+	s.renderPage(w, r, "episodes_list", map[string]any{
+		"Title":      "Episodes",
+		"Episodes":   eps,
+		"Page":       page,
+		"Limit":      limit,
+		"Total":      total,
+		"BookFilter": bookFilter,
 	})
 }
 
@@ -116,11 +217,27 @@ func (s *Server) handleEpisodeRead(w http.ResponseWriter, r *http.Request) {
 		}
 		paths = append(paths, p)
 	}
-	s.renderTemplate(w, "episode_read", map[string]any{
-		"Title":  title,
-		"ID":     id,
-		"BookID": bookID,
-		"Paths":  paths,
+
+	// Discover prev/next chapter ids within the same book.
+	// Episodes are sorted by id ASC in the book detail view, so smaller id = prev.
+	var prevID, nextID int64
+	var prevTitle, nextTitle string
+	_ = s.DB.QueryRowContext(r.Context(),
+		`SELECT id, title FROM episodes WHERE book_id=? AND id < ? ORDER BY id DESC LIMIT 1`,
+		bookID, id).Scan(&prevID, &prevTitle)
+	_ = s.DB.QueryRowContext(r.Context(),
+		`SELECT id, title FROM episodes WHERE book_id=? AND id > ? ORDER BY id ASC LIMIT 1`,
+		bookID, id).Scan(&nextID, &nextTitle)
+
+	s.renderPage(w, r, "episode_read", map[string]any{
+		"Title":     title,
+		"ID":        id,
+		"BookID":    bookID,
+		"Paths":     paths,
+		"PrevID":    prevID,
+		"PrevTitle": prevTitle,
+		"NextID":    nextID,
+		"NextTitle": nextTitle,
 	})
 }
 

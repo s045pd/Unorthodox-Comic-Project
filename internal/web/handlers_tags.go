@@ -34,7 +34,7 @@ func (s *Server) handleTagsList(w http.ResponseWriter, r *http.Request) {
 		}
 		tags = append(tags, t)
 	}
-	s.renderTemplate(w, "tags_list", map[string]any{
+	s.renderPage(w, r, "tags_list", map[string]any{
 		"Title": "Tags",
 		"Tags":  tags,
 	})

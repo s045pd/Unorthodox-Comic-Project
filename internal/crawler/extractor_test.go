@@ -30,8 +30,36 @@ func TestParseBooks_Fixture(t *testing.T) {
 	if books[0].Current != "Chapter 10" {
 		t.Errorf("Current[0] = %q", books[0].Current)
 	}
+	if books[0].Hot != 3960000 {
+		t.Errorf("Hot[0] = %d, want 3960000 (人气：396 万)", books[0].Hot)
+	}
 	if books[1].ID != "xyz-999" {
 		t.Errorf("ID[1] = %q", books[1].ID)
+	}
+	if books[1].Hot != 35000 {
+		t.Errorf("Hot[1] = %d, want 35000 (人气：3.5 万)", books[1].Hot)
+	}
+}
+
+func TestParseHotText(t *testing.T) {
+	tests := []struct {
+		in   string
+		want int
+	}{
+		{"人气：396 万", 3960000},
+		{"人气: 396万", 3960000},
+		{"人气：3.5 万", 35000},
+		{"人气：1.2 亿", 120000000},
+		{"收藏：339", 339},
+		{"396", 396},
+		{"", 0},
+		{"no number", 0},
+	}
+	for _, tc := range tests {
+		got := parseHotText(tc.in)
+		if got != tc.want {
+			t.Errorf("parseHotText(%q) = %d, want %d", tc.in, got, tc.want)
+		}
 	}
 }
 
@@ -55,8 +83,8 @@ func TestParseEpisodes_Fixture(t *testing.T) {
 	if len(meta.Tags) != 2 || meta.Tags[0] != "Tag Foo" {
 		t.Errorf("tags = %v", meta.Tags)
 	}
-	if meta.Hot != 4 {
-		t.Errorf("hot = %d, want 4", meta.Hot)
+	if meta.Hot != 3960000 {
+		t.Errorf("hot = %d, want 3960000 (from 人气: 396 万)", meta.Hot)
 	}
 	if meta.Description != "This is the description line." {
 		t.Errorf("desc = %q", meta.Description)

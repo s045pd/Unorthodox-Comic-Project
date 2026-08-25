@@ -20,11 +20,22 @@ var migrationsFS embed.FS
 // Open opens (or creates) a SQLite DB at path, enables WAL + foreign keys, and
 // applies any pending embedded migrations.
 func Open(ctx context.Context, path string) (*sql.DB, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", path)
+	// busy_timeout 30s + WAL + synchronous=NORMAL is the standard high-concurrency
+	// SQLite recipe. _txlock=immediate makes BEGIN take a write lock up-front so
+	// the writer never deadlocks against itself across goroutines.
+	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(30000)&_txlock=immediate", path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
+	// SQLite WAL allows many concurrent readers + 1 writer. We size the pool
+	// generously (16) so web SELECTs never queue behind the 8 worker writers
+	// that hold connections during INSERT/UPDATE transactions. Writer-vs-writer
+	// collisions are still bounded by busy_timeout=30s + _txlock=immediate set
+	// in the DSN above; readers don't block writers under WAL.
+	db.SetMaxOpenConns(16)
+	db.SetMaxIdleConns(16)
+	db.SetConnMaxLifetime(0)
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("ping sqlite: %w", err)

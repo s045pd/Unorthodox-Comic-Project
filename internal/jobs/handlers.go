@@ -1,11 +1,18 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/jpeg"
+	_ "image/png"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,31 +75,44 @@ func (d *Deps) HandleFindBooks(ctx context.Context, _ json.RawMessage) error {
 		maxPage = d.MaxPage
 	}
 
+	// Per-page failures are isolated: one bad page shouldn't kill the whole sweep.
+	// Same for per-book DB errors. Return error only if EVERY page failed.
+	var pageOK, pageErr, bookOK, bookErr int
 	for page := 1; page <= maxPage; page++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		books, err := d.Extractor.FetchBooks(ctx, page)
 		if err != nil {
-			return fmt.Errorf("page %d: %w", page, err)
+			pageErr++
+			slog.Warn("find_books: page failed, continuing", "page", page, "err", err)
+			continue
 		}
+		pageOK++
 		if len(books) == 0 {
 			break
 		}
 
 		for _, b := range books {
 			now := time.Now().Unix()
+			// Hot from listing card overrides only if non-zero, so we never
+			// overwrite a richer value previously sourced from the detail page.
 			if _, err := d.DB.ExecContext(ctx, `
-				INSERT INTO books (id, title, raw_url, image_url, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?)
+				INSERT INTO books (id, title, raw_url, image_url, hot, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT(id) DO UPDATE SET
 					title=excluded.title,
 					raw_url=excluded.raw_url,
 					image_url=excluded.image_url,
+					hot=CASE WHEN excluded.hot > 0 THEN excluded.hot ELSE books.hot END,
 					updated_at=excluded.updated_at`,
-				b.ID, b.Title, b.RawURL, b.ImageURL, now, now); err != nil {
-				return fmt.Errorf("upsert book %s: %w", b.ID, err)
+				b.ID, b.Title, b.RawURL, b.ImageURL, b.Hot, now, now); err != nil {
+				bookErr++
+				slog.Warn("find_books: book upsert failed, continuing",
+					"id", b.ID, "err", err)
+				continue
 			}
+			bookOK++
 
 			// Check outdated: no episodes yet OR last episode title != current
 			var lastTitle sql.NullString
@@ -105,10 +125,18 @@ func (d *Deps) HandleFindBooks(ctx context.Context, _ json.RawMessage) error {
 				_ = d.Queue.Enqueue(ctx, KindFindEpisodes,
 					fmt.Sprintf("find_episodes:%s", b.ID),
 					findEpisodesPayload{BookID: b.ID},
+					WithPriority(1),
 					WithDelay(time.Duration(5+len(b.ID)%5)*time.Second),
 				)
 			}
 		}
+	}
+	slog.Info("find_books done",
+		"max_page", maxPage,
+		"pages_ok", pageOK, "pages_failed", pageErr,
+		"books_ok", bookOK, "books_failed", bookErr)
+	if pageOK == 0 {
+		return fmt.Errorf("all %d pages failed (e.g. %d errors)", maxPage, pageErr)
 	}
 	return nil
 }
@@ -151,40 +179,52 @@ func (d *Deps) HandleFindEpisodes(ctx context.Context, payload json.RawMessage) 
 		meta.Hot, meta.Description, now, p.BookID); err != nil {
 		return err
 	}
+	// Tag upserts are best-effort: a single bad tag shouldn't kill the whole task.
 	for _, tagName := range meta.Tags {
 		var tagID int64
 		err := d.DB.QueryRowContext(ctx,
 			`INSERT INTO tags(name) VALUES(?) ON CONFLICT(name) DO UPDATE SET name=excluded.name RETURNING id`,
 			tagName).Scan(&tagID)
 		if err != nil {
-			return fmt.Errorf("tag %q: %w", tagName, err)
+			slog.Warn("find_episodes: tag upsert failed, continuing",
+				"book", p.BookID, "tag", tagName, "err", err)
+			continue
 		}
 		if _, err := d.DB.ExecContext(ctx,
 			`INSERT OR IGNORE INTO book_tags(book_id, tag_id) VALUES(?, ?)`,
 			p.BookID, tagID); err != nil {
-			return err
+			slog.Warn("find_episodes: link book_tag failed, continuing",
+				"book", p.BookID, "tag", tagName, "err", err)
 		}
 	}
 
-	// Upsert episodes; schedule find_images for new ones
+	// Upsert episodes; per-episode failure is isolated.
+	var epOK, epErr int
 	for _, ep := range eps {
-		res, err := d.DB.ExecContext(ctx, `
+		_, err := d.DB.ExecContext(ctx, `
 			INSERT INTO episodes (id, book_id, title, raw_url, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET title=excluded.title, raw_url=excluded.raw_url, updated_at=excluded.updated_at`,
 			ep.ID, p.BookID, ep.Title, ep.RawURL, now, now)
 		if err != nil {
-			return err
+			epErr++
+			slog.Warn("find_episodes: episode upsert failed, continuing",
+				"book", p.BookID, "ep", ep.ID, "err", err)
+			continue
 		}
-		_ = res
+		epOK++
 		var imgCount int
 		d.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM images WHERE episode_id=?`, ep.ID).Scan(&imgCount)
 		if imgCount == 0 {
 			_ = d.Queue.Enqueue(ctx, KindFindImages,
 				fmt.Sprintf("find_images:%d", ep.ID),
 				findImagesPayload{EpisodeID: ep.ID},
+				WithPriority(2),
 				WithDelay(5*time.Second))
 		}
+	}
+	if epOK == 0 && epErr > 0 {
+		return fmt.Errorf("all %d episodes failed to upsert", epErr)
 	}
 	return nil
 }
@@ -209,26 +249,34 @@ func (d *Deps) HandleFindImages(ctx context.Context, payload json.RawMessage) er
 	}
 
 	now := time.Now().Unix()
+	var imgOK, imgErr int
 	for _, img := range imgs {
-		res, err := d.DB.ExecContext(ctx, `
+		_, err := d.DB.ExecContext(ctx, `
 			INSERT INTO images (id, episode_id, idx, raw_url, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET idx=excluded.idx, raw_url=excluded.raw_url, updated_at=excluded.updated_at`,
 			img.ID, p.EpisodeID, img.Index, img.RawURL, now, now)
 		if err != nil {
-			return err
+			imgErr++
+			slog.Warn("find_images: image upsert failed, continuing",
+				"ep", p.EpisodeID, "img", img.ID, "idx", img.Index, "err", err)
+			continue
 		}
-		n, _ := res.RowsAffected()
+		imgOK++
 
 		var filePath string
 		d.DB.QueryRowContext(ctx, `SELECT file_path FROM images WHERE id=?`, img.ID).Scan(&filePath)
 
-		if n == 1 || p.Force || filePath == "" {
+		if p.Force || filePath == "" {
 			_ = d.Queue.Enqueue(ctx, KindDownloadImage,
 				fmt.Sprintf("download_image:%d", img.ID),
 				downloadImagePayload{ImageID: img.ID},
+				WithPriority(5),
 				WithDelay(time.Duration(img.Index%5)*time.Second))
 		}
+	}
+	if imgOK == 0 && imgErr > 0 {
+		return fmt.Errorf("all %d images failed to upsert", imgErr)
 	}
 	return nil
 }
@@ -251,6 +299,7 @@ func (d *Deps) HandleDownloadImage(ctx context.Context, payload json.RawMessage)
 	if err != nil {
 		return fmt.Errorf("image lookup: %w", err)
 	}
+	rawURL = strings.TrimSpace(rawURL) // self-heal stale rows with trailing whitespace
 	if rawURL == "" {
 		return errors.New("image has no raw_url")
 	}
@@ -261,6 +310,15 @@ func (d *Deps) HandleDownloadImage(ctx context.Context, payload json.RawMessage)
 	}
 	if detected := crawler.ExtFromMagic(data); detected != "" {
 		ext = detected
+	}
+
+	// PNG → JPEG q=82 transcode (PNG manga pages are wastefully large; JPEG is
+	// usually 5-10x smaller with imperceptible quality loss for screen-tone art).
+	if ext == "png" {
+		if jpegBytes, ok := transcodePNGtoJPEG(data, 82); ok {
+			data = jpegBytes
+			ext = "jpg"
+		}
 	}
 
 	rel := filepath.Join("books",
@@ -278,6 +336,27 @@ func (d *Deps) HandleDownloadImage(ctx context.Context, payload json.RawMessage)
 		return err
 	}
 	return nil
+}
+
+// transcodePNGtoJPEG decodes a PNG and re-encodes as JPEG at the given quality.
+// Returns (encoded, true) on success, (nil, false) on any decode/encode failure
+// (caller should keep original bytes in that case).
+func transcodePNGtoJPEG(pngData []byte, quality int) ([]byte, bool) {
+	img, _, err := image.Decode(bytes.NewReader(pngData))
+	if err != nil {
+		return nil, false
+	}
+	// JPEG cannot encode RGBA with alpha; flatten onto white background.
+	bounds := img.Bounds()
+	flat := image.NewRGBA(bounds)
+	draw.Draw(flat, bounds, &image.Uniform{C: color.White}, image.Point{}, draw.Src)
+	draw.Draw(flat, bounds, img, bounds.Min, draw.Over)
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, flat, &jpeg.Options{Quality: quality}); err != nil {
+		return nil, false
+	}
+	return buf.Bytes(), true
 }
 
 func sanitizeID(s string) string {
@@ -380,6 +459,7 @@ func (d *Deps) HandleFixImages(ctx context.Context, _ json.RawMessage) error {
 		_ = d.Queue.Enqueue(ctx, KindDownloadImage,
 			fmt.Sprintf("download_image:%d", id),
 			downloadImagePayload{ImageID: id},
+			WithPriority(5),
 			WithDelay(time.Duration(i/50*10)*time.Second))
 	}
 	return nil
@@ -411,6 +491,7 @@ func (d *Deps) HandleFixPDF(ctx context.Context, _ json.RawMessage) error {
 		_ = d.Queue.Enqueue(ctx, KindConvertPDF,
 			fmt.Sprintf("convert_pdf:%d", id),
 			convertPDFPayload{EpisodeID: id},
+			WithPriority(8),
 			WithDelay(time.Duration(i*5)*time.Second))
 	}
 	return nil

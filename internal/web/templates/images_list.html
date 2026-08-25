@@ -7,14 +7,23 @@
   <main class="shell">
     <header class="page-head">
       <div>
-        <p class="crumb">SECTION <b>// 04</b> · ASSET INVENTORY</p>
+        <p class="crumb">SECTION <b>// 04</b> · ASSET INVENTORY{{if .EpisodeFilter}} · CHAPTER <b>{{.EpisodeFilter}}</b>{{end}}{{if .MissingOnly}} · <b>MISSING ONLY</b>{{end}}</p>
         <h1>{{.Title}}<br/>VAULT</h1>
       </div>
       <div class="meta">
-        <span>RECORDS</span>
-        <b>{{len .Images}}</b>
+        <span>{{if or .EpisodeFilter .MissingOnly}}MATCHED{{else}}RECORDS{{end}}</span>
+        <b>{{.Total}}</b>
+        <span>MISSING <b>{{.Missing}}</b></span>
       </div>
     </header>
+
+    <form class="filter-bar" method="get" action="/images" role="search">
+      <input type="search" name="episode" value="{{.EpisodeFilter}}" placeholder="FILTER BY EPISODE ID…" autocomplete="off"/>
+      <button type="submit" class="btn tiny">▸ FILTER</button>
+      <a class="btn tiny {{if .MissingOnly}}red{{else}}ghost{{end}}" href="?missing=1{{if .EpisodeFilter}}&episode={{.EpisodeFilter}}{{end}}">⚠ MISSING ONLY</a>
+      {{if or .EpisodeFilter .MissingOnly}}<a class="btn tiny ghost" href="/images">✕ CLEAR</a>{{end}}
+      {{if .EpisodeFilter}}<span class="filter-chip">▮ CH · <b>{{.EpisodeFilter}}</b> <a href="/episodes/{{.EpisodeFilter}}" title="open chapter">↗</a></span>{{end}}
+    </form>
 
     <span class="section-label">▮ FRAME-BY-FRAME · LIMIT 500</span>
     {{if .Images}}
@@ -22,7 +31,7 @@
       {{range .Images}}
       <div class="zrow img">
         <span class="id">№{{.ID}}</span>
-        <span><a href="/episodes/{{.EpisodeID}}" style="color:var(--blood);text-decoration:none;font-family:var(--t-mono)">CH·{{.EpisodeID}}</a></span>
+        <span><a href="/images?episode={{.EpisodeID}}" style="color:var(--blood);text-decoration:none;font-family:var(--t-mono)">CH·{{.EpisodeID}}</a></span>
         <span><b>P{{printf "%03d" .Index}}</b></span>
         <span><span class="code">{{.Bytes}} B</span></span>
         <span>{{if .HasFile}}<span class="pill done">SAVED</span>{{else}}<span class="pill failed">MISSING</span>{{end}}</span>
@@ -31,7 +40,7 @@
       {{end}}
     </div>
     {{else}}
-    <div class="empty"><span class="big">∅</span>NO IMAGES INDEXED</div>
+    <div class="empty"><span class="big">∅</span>{{if or .EpisodeFilter .MissingOnly}}NO MATCHES · TRY CLEARING FILTERS{{else}}NO IMAGES INDEXED{{end}}</div>
     {{end}}
   </main>
 </body>

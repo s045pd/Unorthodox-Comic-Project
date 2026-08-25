@@ -13,8 +13,18 @@ import (
 type ctxKey int
 
 const (
-	ctxUser ctxKey = iota
+	ctxUser    ctxKey = iota // username (string), kept for backward compat
+	ctxSession               // *auth.Session — full session data including role + user id
 )
+
+// SessionFromContext returns the *auth.Session stored on the request context
+// by sessionMiddleware. nil if the request didn't go through the middleware.
+func SessionFromContext(ctx context.Context) *auth.Session {
+	if sess, ok := ctx.Value(ctxSession).(*auth.Session); ok {
+		return sess
+	}
+	return nil
+}
 
 // sessionMiddleware looks up the session cookie; on miss, redirects HTML
 // routes to /login and returns 401 for /api/ routes.
@@ -37,9 +47,27 @@ func sessionMiddleware(store *auth.Store) func(http.Handler) http.Handler {
 				return
 			}
 			ctx := context.WithValue(r.Context(), ctxUser, sess.Username)
+			ctx = context.WithValue(ctx, ctxSession, sess)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// requireAdmin gates routes that only admins may use. Must be chained AFTER
+// sessionMiddleware (so the session is already on the context).
+func requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess := SessionFromContext(r.Context())
+		if sess == nil || !sess.IsAdmin() {
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				http.Error(w, "forbidden: admin only", http.StatusForbidden)
+				return
+			}
+			http.Error(w, "Forbidden — admin only", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func unauthorized(w http.ResponseWriter, r *http.Request) {
